@@ -1,8 +1,6 @@
--- ══════════════════════════════════════════════════════════════
---   BRM5 FULL UTILITIES
---   Features: Potato Graphics, Hitbox ESP Sky, Silent Aim,
---             Autoshoot, Fly, Fullbright, No-Fog, Material Fix
--- ══════════════════════════════════════════════════════════════
+-- ══════════════════════════════════════
+--   BRM5 UTILITIES v2 - STABLE BUILD
+-- ══════════════════════════════════════
 
 local Lighting         = game:GetService("Lighting")
 local Players          = game:GetService("Players")
@@ -10,120 +8,115 @@ local UserInputService = game:GetService("UserInputService")
 local Workspace        = game:GetService("Workspace")
 local MaterialService  = game:GetService("MaterialService")
 local RunService       = game:GetService("RunService")
+local TweenService     = game:GetService("TweenService")
 local Camera           = Workspace.CurrentCamera
 
 local LocalPlayer = Players.LocalPlayer
 local Mouse       = LocalPlayer:GetMouse()
 
 -- ══════════════════════════════════════
---  EINSTELLUNGEN / KONFIGURATION
+--  ABSTURZ-SCHUTZ: Alle Funktionen in pcall
+-- ══════════════════════════════════════
+
+local function safeCall(fn, ...)
+    local ok, err = pcall(fn, ...)
+    if not ok then
+        warn("[BRM5 Error]: " .. tostring(err))
+    end
+    return ok
+end
+
+-- ══════════════════════════════════════
+--  KONFIGURATION
 -- ══════════════════════════════════════
 
 local Config = {
-    -- Fullbright
     Brightness     = 2,
     ClockTime      = 14,
     Ambient        = Color3.fromRGB(178, 178, 178),
     OutdoorAmbient = Color3.fromRGB(178, 178, 178),
     GlobalShadows  = false,
-    FogStart       = 100000,
-    FogEnd         = 100000,
 
-    -- ESP
     ESP_FillColor           = Color3.fromRGB(255, 255, 0),
-    ESP_FillTransparency    = 0.9,
+    ESP_FillTransparency    = 0.85,
     ESP_OutlineColor        = Color3.fromRGB(0, 255, 0),
-    ESP_OutlineTransparency = 0.2,
+    ESP_OutlineTransparency = 0.1,
 
-    -- Hitbox
-    HitboxSize = Vector3.new(12, 12, 12),
+    HitboxSize        = 10,
     HitboxTransparency = 0.7,
-    HitboxColor = BrickColor.new("Really red"),
 
-    -- Silent Aim
-    SilentAimRadius = 250,  -- Pixel-Radius auf dem Bildschirm
+    SilentAimRadius = 200,
+    AutoShootDelay  = 0.15,
 
-    -- Fly
     FlySpeed = 80,
-
-    -- Potato Graphics
-    PotatoRenderDistance = 200,
-    PotatoQuality = 1,
 }
 
 -- ══════════════════════════════════════
---  ORIGINAL-WERTE SICHERN
+--  ZUSTÄNDE
 -- ══════════════════════════════════════
 
-local Original = {
-    Brightness     = Lighting.Brightness,
-    ClockTime      = Lighting.ClockTime,
-    Ambient        = Lighting.Ambient,
-    OutdoorAmbient = Lighting.OutdoorAmbient,
-    GlobalShadows  = Lighting.GlobalShadows,
-    FogStart       = Lighting.FogStart,
-    FogEnd         = Lighting.FogEnd,
+local States = {
+    fullbright  = false,
+    esp         = false,
+    hitbox      = false,
+    silentaim   = false,
+    autoshoot   = false,
+    fly         = false,
+    potato      = false,
+    guiVisible  = true,
 }
 
--- ══════════════════════════════════════
---  ZUSTANDS-VARIABLEN
--- ══════════════════════════════════════
+local Original = {}
+local Connections = {}
+local flyBody, flyGyro = nil, nil
+local applying = false
+local potatoOriginals = {}
 
-local originalAtmospheres = {}
-local lightingConns       = {}
-local espConn             = nil
-local fullbrightActive    = false
-local espActive           = false
-local applying            = false
-local noFogActive         = true
-
-local hitboxActive     = false
-local silentAimActive  = false
-local autoShootActive  = false
-local flyActive        = false
-local potatoActive     = false
-
-local flyBody          = nil
-local flyGyro          = nil
-local flyConn          = nil
-
-local silentAimConn    = nil
-local autoShootConn    = nil
-local hitboxConns      = {}
-local potatoOriginals  = {}
+-- Original-Werte sichern
+safeCall(function()
+    Original.Brightness     = Lighting.Brightness
+    Original.ClockTime      = Lighting.ClockTime
+    Original.Ambient        = Lighting.Ambient
+    Original.OutdoorAmbient = Lighting.OutdoorAmbient
+    Original.GlobalShadows  = Lighting.GlobalShadows
+    Original.FogStart       = Lighting.FogStart
+    Original.FogEnd         = Lighting.FogEnd
+end)
 
 -- ══════════════════════════════════════
 --  HILFSFUNKTIONEN
 -- ══════════════════════════════════════
 
-local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
-local originalDensity = atmosphere and atmosphere.Density or 0
-
-local function getEnemyModels()
-    local enemies = {}
-    for _, obj in pairs(Workspace:GetChildren()) do
-        if obj:IsA("Model") and obj ~= LocalPlayer.Character then
-            if obj.Name == "Male" or obj.Name == "Model" or obj:FindFirstChild("Humanoid") then
-                local hum = obj:FindFirstChildOfClass("Humanoid")
-                if hum and hum.Health > 0 then
-                    table.insert(enemies, obj)
-                end
-            end
-        end
+local function addConnection(name, conn)
+    if not Connections[name] then
+        Connections[name] = {}
     end
-    -- Auch in verschachtelten Ordnern suchen
-    for _, folder in pairs(Workspace:GetChildren()) do
-        if folder:IsA("Folder") or folder:IsA("Model") then
-            for _, obj in pairs(folder:GetChildren()) do
-                if obj:IsA("Model") and obj ~= LocalPlayer.Character then
-                    if obj.Name == "Male" or obj.Name == "Model" or obj:FindFirstChild("Humanoid") then
-                        local hum = obj:FindFirstChildOfClass("Humanoid")
-                        if hum and hum.Health > 0 then
-                            table.insert(enemies, obj)
-                        end
-                    end
-                end
-            end
+    table.insert(Connections[name], conn)
+end
+
+local function clearConnections(name)
+    if Connections[name] then
+        for _, c in ipairs(Connections[name]) do
+            pcall(function() c:Disconnect() end)
+        end
+        Connections[name] = {}
+    end
+end
+
+local function isEnemy(obj)
+    if not obj or not obj:IsA("Model") then return false end
+    if obj == LocalPlayer.Character then return false end
+    local hum = obj:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+    if hum.Health <= 0 then return false end
+    return true
+end
+
+local function getEnemies()
+    local enemies = {}
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        if isEnemy(obj) then
+            table.insert(enemies, obj)
         end
     end
     return enemies
@@ -132,10 +125,9 @@ end
 local function getClosestEnemyToMouse()
     local closest = nil
     local closestDist = Config.SilentAimRadius
-    local enemies = getEnemyModels()
 
-    for _, enemy in pairs(enemies) do
-        local head = enemy:FindFirstChild("Head") or enemy:FindFirstChild("HumanoidRootPart")
+    for _, enemy in pairs(getEnemies()) do
+        local head = enemy:FindFirstChild("Head")
         if head then
             local screenPos, onScreen = Camera:WorldToScreenPoint(head.Position)
             if onScreen then
@@ -152,333 +144,249 @@ local function getClosestEnemyToMouse()
     return closest
 end
 
-local function getClosestEnemy()
-    local closest = nil
-    local closestDist = math.huge
-    local myChar = LocalPlayer.Character
-    if not myChar then return nil end
-    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
-    if not myRoot then return nil end
-
-    local enemies = getEnemyModels()
-    for _, enemy in pairs(enemies) do
-        local root = enemy:FindFirstChild("HumanoidRootPart") or enemy:FindFirstChild("Head")
-        if root then
-            local dist = (myRoot.Position - root.Position).Magnitude
-            if dist < closestDist then
-                closestDist = dist
-                closest = enemy
-            end
-        end
-    end
-    return closest
-end
-
 -- ══════════════════════════════════════
---  ZENTRALE FOG-STEUERUNG
--- ══════════════════════════════════════
-
-local function applyFogState()
-    if noFogActive or fullbrightActive then
-        Lighting.FogStart = 999999
-        Lighting.FogEnd   = 999999
-        if atmosphere then atmosphere.Density = 0 end
-    else
-        Lighting.FogStart = Original.FogStart
-        Lighting.FogEnd   = Original.FogEnd
-        if atmosphere then atmosphere.Density = originalDensity end
-    end
-end
-
--- ══════════════════════════════════════
---  FULLBRIGHT LOGIK
+--  FULLBRIGHT
 -- ══════════════════════════════════════
 
 local function applyFullbright()
     if applying then return end
     applying = true
-    Lighting.Brightness     = Config.Brightness
-    Lighting.ClockTime      = Config.ClockTime
-    Lighting.Ambient        = Config.Ambient
-    Lighting.OutdoorAmbient = Config.OutdoorAmbient
-    Lighting.GlobalShadows  = Config.GlobalShadows
-    applyFogState()
-    applying = false
-end
+    safeCall(function()
+        Lighting.Brightness     = Config.Brightness
+        Lighting.ClockTime      = Config.ClockTime
+        Lighting.Ambient        = Config.Ambient
+        Lighting.OutdoorAmbient = Config.OutdoorAmbient
+        Lighting.GlobalShadows  = Config.GlobalShadows
+        Lighting.FogStart       = 999999
+        Lighting.FogEnd         = 999999
 
-local function tweakAtmosphere(obj)
-    if obj and obj:IsA("Atmosphere") then
-        if not originalAtmospheres[obj] then
-            originalAtmospheres[obj] = obj.Density
+        for _, child in ipairs(Lighting:GetChildren()) do
+            if child:IsA("Atmosphere") then
+                child.Density = 0
+            end
         end
-        obj.Density = 0
-    end
-end
-
-local function restoreLighting()
-    applying = true
-    Lighting.Brightness     = Original.Brightness
-    Lighting.ClockTime      = Original.ClockTime
-    Lighting.Ambient        = Original.Ambient
-    Lighting.OutdoorAmbient = Original.OutdoorAmbient
-    Lighting.GlobalShadows  = Original.GlobalShadows
-
-    for atmos, density in pairs(originalAtmospheres) do
-        if atmos and atmos.Parent then
-            atmos.Density = density
-        end
-    end
-
-    applyFogState()
+    end)
     applying = false
 end
 
 local function enableFullbright()
-    if fullbrightActive then return end
-    fullbrightActive = true
-
-    for _, child in ipairs(Lighting:GetChildren()) do
-        tweakAtmosphere(child)
-    end
+    States.fullbright = true
     applyFullbright()
 
-    local watchedProps = {"Brightness", "ClockTime", "Ambient", "OutdoorAmbient", "GlobalShadows", "FogStart", "FogEnd"}
-    for _, prop in ipairs(watchedProps) do
-        table.insert(lightingConns, Lighting:GetPropertyChangedSignal(prop):Connect(applyFullbright))
+    local props = {"Brightness", "ClockTime", "Ambient", "OutdoorAmbient", "GlobalShadows", "FogStart", "FogEnd"}
+    for _, prop in ipairs(props) do
+        addConnection("fullbright", Lighting:GetPropertyChangedSignal(prop):Connect(function()
+            if States.fullbright then applyFullbright() end
+        end))
     end
-    table.insert(lightingConns, Lighting.ChildAdded:Connect(tweakAtmosphere))
-    print("[Fullbright] Aktiviert")
 end
 
 local function disableFullbright()
-    if not fullbrightActive then return end
-    fullbrightActive = false
-
-    for _, c in ipairs(lightingConns) do c:Disconnect() end
-    lightingConns = {}
-
-    restoreLighting()
-    print("[Fullbright] Deaktiviert")
+    States.fullbright = false
+    clearConnections("fullbright")
+    safeCall(function()
+        applying = true
+        Lighting.Brightness     = Original.Brightness
+        Lighting.ClockTime      = Original.ClockTime
+        Lighting.Ambient        = Original.Ambient
+        Lighting.OutdoorAmbient = Original.OutdoorAmbient
+        Lighting.GlobalShadows  = Original.GlobalShadows
+        Lighting.FogStart       = Original.FogStart
+        Lighting.FogEnd         = Original.FogEnd
+        applying = false
+    end)
 end
 
 -- ══════════════════════════════════════
---  ESP HIGHLIGHT LOGIK (aus deinem System)
+--  ESP
 -- ══════════════════════════════════════
 
-local function applyHighlight(object)
-    if not object:IsA("Model") then return end
-    if object.Name ~= "Male" and object.Name ~= "Model" and not object:FindFirstChild("Humanoid") then return end
-    if object:FindFirstChildOfClass("Highlight") then return end
-    if object == LocalPlayer.Character then return end
+local function applyESP(obj)
+    safeCall(function()
+        if not isEnemy(obj) then return end
+        if obj:FindFirstChild("BRM5_ESP") then return end
 
-    local highlight = Instance.new("Highlight")
-    highlight.Adornee             = object
-    highlight.FillColor           = Config.ESP_FillColor
-    highlight.FillTransparency    = Config.ESP_FillTransparency
-    highlight.OutlineColor        = Config.ESP_OutlineColor
-    highlight.OutlineTransparency = Config.ESP_OutlineTransparency
-    highlight.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
-    highlight.Parent              = object
-end
-
-local function scanAndApplyESP(parent)
-    for _, obj in pairs(parent:GetChildren()) do
-        applyHighlight(obj)
-        if obj:IsA("Folder") or (obj:IsA("Model") and not obj:FindFirstChild("Humanoid")) then
-            scanAndApplyESP(obj)
-        end
-    end
+        local hl = Instance.new("Highlight")
+        hl.Name                = "BRM5_ESP"
+        hl.Adornee             = obj
+        hl.FillColor           = Config.ESP_FillColor
+        hl.FillTransparency    = Config.ESP_FillTransparency
+        hl.OutlineColor        = Config.ESP_OutlineColor
+        hl.OutlineTransparency = Config.ESP_OutlineTransparency
+        hl.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
+        hl.Parent              = obj
+    end)
 end
 
 local function enableESP()
-    if espActive then return end
-    espActive = true
+    States.esp = true
 
-    scanAndApplyESP(Workspace)
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        applyESP(obj)
+    end
 
-    espConn = Workspace.DescendantAdded:Connect(function(obj)
-        if espActive then
-            task.wait(0.2)
-            if obj:IsA("Model") then
-                applyHighlight(obj)
-            elseif obj.Parent and obj.Parent:IsA("Model") then
-                applyHighlight(obj.Parent)
+    addConnection("esp", Workspace.DescendantAdded:Connect(function(obj)
+        if not States.esp then return end
+        task.defer(function()
+            task.wait(0.3)
+            if obj and obj.Parent then
+                applyESP(obj)
+                if obj.Parent and obj.Parent:IsA("Model") then
+                    applyESP(obj.Parent)
+                end
             end
-        end
-    end)
-    print("[ESP] Aktiviert")
+        end)
+    end))
 end
 
 local function disableESP()
-    if not espActive then return end
-    espActive = false
-
-    if espConn then
-        espConn:Disconnect()
-        espConn = nil
-    end
-
+    States.esp = false
+    clearConnections("esp")
     for _, obj in pairs(Workspace:GetDescendants()) do
-        if obj:IsA("Highlight") and obj.Name == "Highlight" then
-            obj:Destroy()
+        if obj:IsA("Highlight") and obj.Name == "BRM5_ESP" then
+            pcall(function() obj:Destroy() end)
         end
     end
-    print("[ESP] Deaktiviert")
 end
 
 -- ══════════════════════════════════════
---  HITBOX EXPANDER (SKY / Sichtbar)
+--  HITBOX
 -- ══════════════════════════════════════
 
-local function applyHitboxToModel(model)
-    if not model:IsA("Model") then return end
-    if model == LocalPlayer.Character then return end
-    if model.Name ~= "Male" and model.Name ~= "Model" and not model:FindFirstChild("Humanoid") then return end
+local function applyHitbox(model)
+    safeCall(function()
+        if not isEnemy(model) then return end
+        local head = model:FindFirstChild("Head")
+        if not head then return end
+        if head:FindFirstChild("BRM5_Hitbox") then return end
 
-    local head = model:FindFirstChild("Head")
-    if not head then return end
-
-    local hum = model:FindFirstChildOfClass("Humanoid")
-    if not hum or hum.Health <= 0 then return end
-
-    -- Hitbox-Part erstellen oder aktualisieren
-    local hitboxPart = head:FindFirstChild("HitboxExpander")
-    if not hitboxPart then
-        hitboxPart = Instance.new("Part")
-        hitboxPart.Name = "HitboxExpander"
-        hitboxPart.Anchored = false
-        hitboxPart.CanCollide = false
-        hitboxPart.Massless = true
-        hitboxPart.Shape = Enum.PartType.Block
-        hitboxPart.Material = Enum.Material.ForceField
-        hitboxPart.Parent = head
+        local box = Instance.new("Part")
+        box.Name = "BRM5_Hitbox"
+        box.Size = Vector3.new(Config.HitboxSize, Config.HitboxSize, Config.HitboxSize)
+        box.Anchored = false
+        box.CanCollide = false
+        box.Massless = true
+        box.Transparency = Config.HitboxTransparency
+        box.BrickColor = BrickColor.new("Really red")
+        box.Material = Enum.Material.ForceField
+        box.Parent = head
 
         local weld = Instance.new("Weld")
         weld.Part0 = head
-        weld.Part1 = hitboxPart
-        weld.C0 = CFrame.new(0, 0, 0)
-        weld.Parent = hitboxPart
-    end
-
-    hitboxPart.Size = Config.HitboxSize
-    hitboxPart.Transparency = Config.HitboxTransparency
-    hitboxPart.BrickColor = Config.HitboxColor
+        weld.Part1 = box
+        weld.C0 = CFrame.new()
+        weld.Parent = box
+    end)
 end
 
 local function enableHitbox()
-    if hitboxActive then return end
-    hitboxActive = true
+    States.hitbox = true
 
     for _, obj in pairs(Workspace:GetDescendants()) do
         if obj:IsA("Model") then
-            pcall(function() applyHitboxToModel(obj) end)
+            applyHitbox(obj)
         end
     end
 
-    local conn = Workspace.DescendantAdded:Connect(function(obj)
-        if hitboxActive then
-            task.wait(0.3)
-            if obj:IsA("Model") then
-                pcall(function() applyHitboxToModel(obj) end)
-            elseif obj.Parent and obj.Parent:IsA("Model") then
-                pcall(function() applyHitboxToModel(obj.Parent) end)
+    addConnection("hitbox", Workspace.DescendantAdded:Connect(function(obj)
+        if not States.hitbox then return end
+        task.defer(function()
+            task.wait(0.5)
+            if obj and obj:IsA("Model") then
+                applyHitbox(obj)
+            elseif obj and obj.Parent and obj.Parent:IsA("Model") then
+                applyHitbox(obj.Parent)
             end
+        end)
+    end))
+
+    -- Periodisch neue Feinde scannen (langsam, nicht jeden Frame)
+    addConnection("hitbox", RunService.Heartbeat:Connect(function()
+        if not States.hitbox then return end
+    end))
+
+    -- Langsamer Scanner alle 2 Sekunden
+    task.defer(function()
+        while States.hitbox do
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj:IsA("Model") then
+                    applyHitbox(obj)
+                end
+            end
+            task.wait(2)
         end
     end)
-    table.insert(hitboxConns, conn)
-
-    -- Kontinuierlich Hitboxen aktualisieren (für neu-spawnende Feinde)
-    local updateConn = RunService.Heartbeat:Connect(function()
-        if not hitboxActive then return end
-        for _, obj in pairs(Workspace:GetDescendants()) do
-            if obj:IsA("Model") then
-                pcall(function() applyHitboxToModel(obj) end)
-            end
-        end
-    end)
-    table.insert(hitboxConns, updateConn)
-
-    print("[Hitbox ESP] Aktiviert - Größe: " .. tostring(Config.HitboxSize))
 end
 
 local function disableHitbox()
-    if not hitboxActive then return end
-    hitboxActive = false
-
-    for _, c in ipairs(hitboxConns) do c:Disconnect() end
-    hitboxConns = {}
-
+    States.hitbox = false
+    clearConnections("hitbox")
     for _, obj in pairs(Workspace:GetDescendants()) do
-        if obj:IsA("Part") and obj.Name == "HitboxExpander" then
-            obj:Destroy()
+        if obj:IsA("Part") and obj.Name == "BRM5_Hitbox" then
+            pcall(function() obj:Destroy() end)
         end
     end
-    print("[Hitbox ESP] Deaktiviert")
 end
 
 -- ══════════════════════════════════════
 --  SILENT AIM
 -- ══════════════════════════════════════
 
-local function enableSilentAim()
-    if silentAimActive then return end
-    silentAimActive = true
+local oldIndex = nil
+local oldNamecall = nil
 
-    -- Namespace-Hook für den Maus-Hit
-    local oldNamecall
-    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        local method = getnamecallmethod()
-        if silentAimActive then
-            if method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRay" or method == "Raycast" then
-                local target = getClosestEnemyToMouse()
-                if target then
-                    local head = target:FindFirstChild("Head") or target:FindFirstChild("HumanoidRootPart")
-                    if head then
-                        local args = {...}
-                        if method == "Raycast" then
-                            -- Workspace:Raycast
-                            local origin = args[1]
-                            if typeof(origin) == "Vector3" then
-                                local dir = (head.Position - origin).Unit * 1000
-                                args[2] = dir
-                                return oldNamecall(self, unpack(args))
+local function enableSilentAim()
+    States.silentaim = true
+
+    safeCall(function()
+        if hookmetamethod then
+            if not oldIndex then
+                oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
+                    if States.silentaim and self == Mouse then
+                        local target = getClosestEnemyToMouse()
+                        if target then
+                            local head = target:FindFirstChild("Head")
+                            if head then
+                                if key == "Hit" then
+                                    return head.CFrame
+                                elseif key == "Target" then
+                                    return head
+                                end
                             end
                         end
                     end
-                end
+                    return oldIndex(self, key)
+                end))
             end
-        end
-        return oldNamecall(self, ...)
-    end)
 
-    -- Index-Hook für Mouse.Hit und Mouse.Target
-    local oldIndex
-    oldIndex = hookmetamethod(game, "__index", function(self, key)
-        if silentAimActive then
-            if self == Mouse then
-                local target = getClosestEnemyToMouse()
-                if target then
-                    local head = target:FindFirstChild("Head") or target:FindFirstChild("HumanoidRootPart")
-                    if head then
-                        if key == "Hit" then
-                            return head.CFrame
-                        elseif key == "Target" then
-                            return head
+            if not oldNamecall then
+                oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+                    local method = getnamecallmethod()
+                    if States.silentaim and (method == "FindPartOnRayWithIgnoreList" or method == "Raycast") then
+                        local target = getClosestEnemyToMouse()
+                        if target then
+                            local head = target:FindFirstChild("Head")
+                            if head and method == "Raycast" then
+                                local args = {...}
+                                if typeof(args[1]) == "Vector3" then
+                                    local dir = (head.Position - args[1]).Unit * 1000
+                                    args[2] = dir
+                                    return oldNamecall(self, unpack(args))
+                                end
+                            end
                         end
                     end
-                end
+                    return oldNamecall(self, ...)
+                end))
             end
+        else
+            warn("[Silent Aim] hookmetamethod nicht verfügbar - Executor unterstützt es nicht")
         end
-        return oldIndex(self, key)
     end)
-
-    print("[Silent Aim] Aktiviert - Radius: " .. Config.SilentAimRadius .. "px")
 end
 
 local function disableSilentAim()
-    if not silentAimActive then return end
-    silentAimActive = false
-    print("[Silent Aim] Deaktiviert")
+    States.silentaim = false
 end
 
 -- ══════════════════════════════════════
@@ -486,45 +394,33 @@ end
 -- ══════════════════════════════════════
 
 local function enableAutoShoot()
-    if autoShootActive then return end
-    autoShootActive = true
+    States.autoshoot = true
 
-    autoShootConn = RunService.Heartbeat:Connect(function()
-        if not autoShootActive then return end
-
-        local target = getClosestEnemyToMouse()
-        if target then
-            local head = target:FindFirstChild("Head") or target:FindFirstChild("HumanoidRootPart")
-            if head then
-                local screenPos, onScreen = Camera:WorldToScreenPoint(head.Position)
-                if onScreen then
-                    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
-                    local targetPos = Vector2.new(screenPos.X, screenPos.Y)
-                    local dist = (mousePos - targetPos).Magnitude
-
-                    if dist < Config.SilentAimRadius then
-                        -- Simuliere Mausklick
-                        mouse1press()
-                        task.wait(0.05)
-                        mouse1release()
+    task.defer(function()
+        while States.autoshoot do
+            safeCall(function()
+                local target = getClosestEnemyToMouse()
+                if target then
+                    local head = target:FindFirstChild("Head")
+                    if head then
+                        local _, onScreen = Camera:WorldToScreenPoint(head.Position)
+                        if onScreen then
+                            if mouse1press and mouse1release then
+                                mouse1press()
+                                task.wait(0.03)
+                                mouse1release()
+                            end
+                        end
                     end
                 end
-            end
+            end)
+            task.wait(Config.AutoShootDelay)
         end
     end)
-
-    print("[AutoShoot] Aktiviert")
 end
 
 local function disableAutoShoot()
-    if not autoShootActive then return end
-    autoShootActive = false
-
-    if autoShootConn then
-        autoShootConn:Disconnect()
-        autoShootConn = nil
-    end
-    print("[AutoShoot] Deaktiviert")
+    States.autoshoot = false
 end
 
 -- ══════════════════════════════════════
@@ -532,102 +428,66 @@ end
 -- ══════════════════════════════════════
 
 local function enableFly()
-    if flyActive then return end
-    flyActive = true
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
 
-    local character = LocalPlayer.Character
-    if not character then
-        print("[Fly] Kein Character gefunden!")
-        flyActive = false
-        return
-    end
+    States.fly = true
 
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not rootPart or not humanoid then
-        print("[Fly] HumanoidRootPart/Humanoid fehlt!")
-        flyActive = false
-        return
-    end
+    safeCall(function()
+        flyBody = Instance.new("BodyVelocity")
+        flyBody.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+        flyBody.Velocity = Vector3.zero
+        flyBody.Parent = root
 
-    -- BodyVelocity für Bewegung
-    flyBody = Instance.new("BodyVelocity")
-    flyBody.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-    flyBody.Velocity = Vector3.new(0, 0, 0)
-    flyBody.Parent = rootPart
-
-    -- BodyGyro für Rotation
-    flyGyro = Instance.new("BodyGyro")
-    flyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-    flyGyro.D = 200
-    flyGyro.P = 40000
-    flyGyro.Parent = rootPart
-
-    flyConn = RunService.Heartbeat:Connect(function()
-        if not flyActive then return end
-        if not rootPart or not rootPart.Parent then
-            disableFly()
-            return
-        end
-
-        local direction = Vector3.new(0, 0, 0)
-        local speed = Config.FlySpeed
-
-        local camCF = Camera.CFrame
-        local camLook = camCF.LookVector
-        local camRight = camCF.RightVector
-
-        -- WASD-Steuerung
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-            direction = direction + camLook
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-            direction = direction - camLook
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-            direction = direction - camRight
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-            direction = direction + camRight
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-            direction = direction + Vector3.new(0, 1, 0)
-        end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
-            direction = direction - Vector3.new(0, 1, 0)
-        end
-
-        if direction.Magnitude > 0 then
-            direction = direction.Unit
-        end
-
-        flyBody.Velocity = direction * speed
-        flyGyro.CFrame = camCF
+        flyGyro = Instance.new("BodyGyro")
+        flyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+        flyGyro.D = 200
+        flyGyro.P = 40000
+        flyGyro.Parent = root
     end)
 
-    print("[Fly] Aktiviert - Speed: " .. Config.FlySpeed)
+    addConnection("fly", RunService.Heartbeat:Connect(function()
+        if not States.fly then return end
+        if not root or not root.Parent then return end
+
+        local dir = Vector3.zero
+        local camCF = Camera.CFrame
+
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+            dir = dir + camCF.LookVector
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+            dir = dir - camCF.LookVector
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+            dir = dir - camCF.RightVector
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+            dir = dir + camCF.RightVector
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+            dir = dir + Vector3.new(0, 1, 0)
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
+            dir = dir - Vector3.new(0, 1, 0)
+        end
+
+        if dir.Magnitude > 0 then
+            dir = dir.Unit
+        end
+
+        if flyBody then flyBody.Velocity = dir * Config.FlySpeed end
+        if flyGyro then flyGyro.CFrame = camCF end
+    end))
 end
 
 local function disableFly()
-    if not flyActive then return end
-    flyActive = false
-
-    if flyConn then
-        flyConn:Disconnect()
-        flyConn = nil
-    end
-
-    if flyBody then
-        flyBody:Destroy()
-        flyBody = nil
-    end
-
-    if flyGyro then
-        flyGyro:Destroy()
-        flyGyro = nil
-    end
-
-    print("[Fly] Deaktiviert")
+    States.fly = false
+    clearConnections("fly")
+    if flyBody then pcall(function() flyBody:Destroy() end) flyBody = nil end
+    if flyGyro then pcall(function() flyGyro:Destroy() end) flyGyro = nil end
 end
 
 -- ══════════════════════════════════════
@@ -635,106 +495,64 @@ end
 -- ══════════════════════════════════════
 
 local function enablePotato()
-    if potatoActive then return end
-    potatoActive = true
+    States.potato = true
 
-    -- Grafikqualität minimieren
-    pcall(function()
+    safeCall(function()
         settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
     end)
 
-    -- Alle Texturen und Meshes vereinfachen
+    local count = 0
     for _, obj in pairs(Workspace:GetDescendants()) do
-        pcall(function()
+        if count > 5000 then task.wait() count = 0 end -- Absturz vermeiden
+        count = count + 1
+
+        safeCall(function()
             if obj:IsA("Decal") or obj:IsA("Texture") then
-                if not potatoOriginals[obj] then
-                    potatoOriginals[obj] = {Transparency = obj.Transparency}
-                end
+                potatoOriginals[obj] = {Transparency = obj.Transparency}
                 obj.Transparency = 1
             elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") then
-                if not potatoOriginals[obj] then
-                    potatoOriginals[obj] = {Enabled = obj.Enabled}
-                end
+                potatoOriginals[obj] = {Enabled = obj.Enabled}
                 obj.Enabled = false
             elseif obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
-                if not potatoOriginals[obj] then
-                    potatoOriginals[obj] = {Enabled = obj.Enabled}
-                end
+                potatoOriginals[obj] = {Enabled = obj.Enabled}
                 obj.Enabled = false
             elseif obj:IsA("MeshPart") then
-                if not potatoOriginals[obj] then
-                    potatoOriginals[obj] = {
-                        Material = obj.Material,
-                        TextureID = obj.TextureID
-                    }
-                end
+                potatoOriginals[obj] = {Material = obj.Material, TextureID = obj.TextureID}
                 obj.Material = Enum.Material.SmoothPlastic
                 obj.TextureID = ""
-            elseif obj:IsA("BasePart") then
-                if not potatoOriginals[obj] then
-                    potatoOriginals[obj] = {Material = obj.Material}
-                end
+            elseif obj:IsA("BasePart") and not obj:IsA("MeshPart") then
+                potatoOriginals[obj] = {Material = obj.Material}
                 obj.Material = Enum.Material.SmoothPlastic
-            elseif obj:IsA("PostEffect") then
-                if not potatoOriginals[obj] then
-                    potatoOriginals[obj] = {Enabled = obj.Enabled}
-                end
-                obj.Enabled = false
             end
         end)
     end
 
-    -- Post-Processing deaktivieren
-    for _, effect in pairs(Lighting:GetChildren()) do
-        pcall(function()
+    for _, effect in pairs(Lighting:GetDescendants()) do
+        safeCall(function()
             if effect:IsA("PostEffect") then
-                if not potatoOriginals[effect] then
-                    potatoOriginals[effect] = {Enabled = effect.Enabled}
-                end
+                potatoOriginals[effect] = {Enabled = effect.Enabled}
                 effect.Enabled = false
             end
         end)
     end
 
-    -- Schatten und Licht-Effekte minimieren
-    for _, obj in pairs(Workspace:GetDescendants()) do
-        pcall(function()
-            if obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
-                if not potatoOriginals[obj] then
-                    potatoOriginals[obj] = {
-                        Enabled = obj.Enabled,
-                        Shadows = obj.Shadows
-                    }
-                end
-                obj.Shadows = false
-            end
-        end)
-    end
-
-    -- Terrain vereinfachen
-    local terrain = Workspace:FindFirstChildOfClass("Terrain")
-    if terrain then
-        pcall(function()
+    safeCall(function()
+        local terrain = Workspace:FindFirstChildOfClass("Terrain")
+        if terrain then
             terrain.WaterWaveSize = 0
             terrain.WaterWaveSpeed = 0
-            terrain.WaterReflectance = 0
-            terrain.WaterTransparency = 0
-            sethiddenproperty(terrain, "Decoration", false)
-        end)
-    end
-
-    print("[Potato Graphics] Aktiviert - Minimale Grafik")
+            pcall(function() sethiddenproperty(terrain, "Decoration", false) end)
+        end
+    end)
 end
 
 local function disablePotato()
-    if not potatoActive then return end
-    potatoActive = false
+    States.potato = false
 
-    -- Alle originalen Werte wiederherstellen
-    for obj, origData in pairs(potatoOriginals) do
-        pcall(function()
+    for obj, data in pairs(potatoOriginals) do
+        safeCall(function()
             if obj and obj.Parent then
-                for prop, val in pairs(origData) do
+                for prop, val in pairs(data) do
                     obj[prop] = val
                 end
             end
@@ -742,357 +560,695 @@ local function disablePotato()
     end
     potatoOriginals = {}
 
-    pcall(function()
+    safeCall(function()
         settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
     end)
-
-    print("[Potato Graphics] Deaktiviert")
 end
 
 -- ══════════════════════════════════════
---  MATERIAL-FIX
+--  MATERIAL FIX
 -- ══════════════════════════════════════
 
-local function RemoveGrassMaterial()
-    pcall(function()
-        MaterialService.Use2022Materials = false
-    end)
-
+safeCall(function()
+    pcall(function() MaterialService.Use2022Materials = false end)
     local terrain = Workspace:FindFirstChildOfClass("Terrain")
     if terrain then
         pcall(function()
-            terrain.WaterWaveSize  = 0
+            terrain.WaterWaveSize = 0
             terrain.WaterWaveSpeed = 0
             sethiddenproperty(terrain, "Decoration", false)
         end)
     end
-    print("[MaterialFix] Bodenmaterialien wurden angepasst!")
-end
-
--- ══════════════════════════════════════
---  NO-FOG SYSTEM
--- ══════════════════════════════════════
-
-applyFogState()
-
-Lighting:GetPropertyChangedSignal("FogStart"):Connect(function()
-    if applying then return end
-    applyFogState()
 end)
-Lighting:GetPropertyChangedSignal("FogEnd"):Connect(function()
-    if applying then return end
-    applyFogState()
-end)
-if atmosphere then
-    atmosphere:GetPropertyChangedSignal("Density"):Connect(function()
-        if applying then return end
-        applyFogState()
-    end)
-end
 
--- ══════════════════════════════════════
---  GUI ERSTELLEN
--- ══════════════════════════════════════
+-- ══════════════════════════════════════════════════════════════
+--  GUI SYSTEM - KOMPLETT VON HAND GEBAUT
+-- ══════════════════════════════════════════════════════════════
 
-local function createGUI()
-    -- Alte GUI entfernen falls vorhanden
-    local existing = LocalPlayer.PlayerGui:FindFirstChild("BRM5_Utilities")
-    if existing then existing:Destroy() end
+local function BuildUI()
+    -- Cleanup
+    local old = LocalPlayer.PlayerGui:FindFirstChild("BRM5_UI")
+    if old then old:Destroy() end
 
     local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "BRM5_Utilities"
+    ScreenGui.Name = "BRM5_UI"
     ScreenGui.ResetOnSpawn = false
     ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     ScreenGui.Parent = LocalPlayer.PlayerGui
 
-    -- Hauptrahmen
-    local MainFrame = Instance.new("Frame")
-    MainFrame.Name = "MainFrame"
-    MainFrame.Size = UDim2.new(0, 280, 0, 420)
-    MainFrame.Position = UDim2.new(0, 15, 0.5, -210)
-    MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-    MainFrame.BorderSizePixel = 0
-    MainFrame.Active = true
-    MainFrame.Draggable = true
-    MainFrame.Parent = ScreenGui
+    -- ══════════════════════════════
+    --  FARBEN
+    -- ══════════════════════════════
 
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = MainFrame
+    local Colors = {
+        bg          = Color3.fromRGB(12, 12, 18),
+        sidebar     = Color3.fromRGB(18, 18, 28),
+        topbar      = Color3.fromRGB(8, 8, 14),
+        accent      = Color3.fromRGB(0, 140, 255),
+        accentDark  = Color3.fromRGB(0, 100, 200),
+        tabNormal   = Color3.fromRGB(28, 28, 40),
+        tabHover    = Color3.fromRGB(38, 38, 55),
+        tabActive   = Color3.fromRGB(0, 140, 255),
+        toggleOff   = Color3.fromRGB(55, 55, 70),
+        toggleOn    = Color3.fromRGB(0, 180, 80),
+        text        = Color3.fromRGB(220, 220, 230),
+        textDim     = Color3.fromRGB(120, 120, 140),
+        card        = Color3.fromRGB(22, 22, 34),
+        sliderBg    = Color3.fromRGB(35, 35, 50),
+        sliderFill  = Color3.fromRGB(0, 140, 255),
+    }
 
-    local stroke = Instance.new("UIStroke")
-    stroke.Color = Color3.fromRGB(0, 180, 255)
-    stroke.Thickness = 2
-    stroke.Parent = MainFrame
+    -- ══════════════════════════════
+    --  HAUPTFENSTER
+    -- ══════════════════════════════
 
-    -- Titel
-    local TitleBar = Instance.new("Frame")
-    TitleBar.Size = UDim2.new(1, 0, 0, 40)
-    TitleBar.BackgroundColor3 = Color3.fromRGB(0, 120, 200)
-    TitleBar.BorderSizePixel = 0
-    TitleBar.Parent = MainFrame
+    local Main = Instance.new("Frame")
+    Main.Name = "Main"
+    Main.Size = UDim2.new(0, 520, 0, 380)
+    Main.Position = UDim2.new(0.5, -260, 0.5, -190)
+    Main.BackgroundColor3 = Colors.bg
+    Main.BorderSizePixel = 0
+    Main.ClipsDescendants = true
+    Main.Active = true
+    Main.Draggable = true
+    Main.Parent = ScreenGui
 
-    local titleCorner = Instance.new("UICorner")
-    titleCorner.CornerRadius = UDim.new(0, 8)
-    titleCorner.Parent = TitleBar
+    Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
 
-    local TitleLabel = Instance.new("TextLabel")
-    TitleLabel.Size = UDim2.new(1, -10, 1, 0)
-    TitleLabel.Position = UDim2.new(0, 10, 0, 0)
-    TitleLabel.BackgroundTransparency = 1
-    TitleLabel.Text = "⚡ BRM5 UTILITIES ⚡"
-    TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    TitleLabel.TextSize = 18
-    TitleLabel.Font = Enum.Font.GothamBold
-    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    TitleLabel.Parent = TitleBar
+    local mainStroke = Instance.new("UIStroke")
+    mainStroke.Color = Colors.accent
+    mainStroke.Thickness = 1.5
+    mainStroke.Transparency = 0.3
+    mainStroke.Parent = Main
 
-    -- Minimieren-Button
+    -- ══════════════════════════════
+    --  TOP BAR
+    -- ══════════════════════════════
+
+    local TopBar = Instance.new("Frame")
+    TopBar.Size = UDim2.new(1, 0, 0, 35)
+    TopBar.BackgroundColor3 = Colors.topbar
+    TopBar.BorderSizePixel = 0
+    TopBar.Parent = Main
+
+    local Title = Instance.new("TextLabel")
+    Title.Size = UDim2.new(1, -80, 1, 0)
+    Title.Position = UDim2.new(0, 12, 0, 0)
+    Title.BackgroundTransparency = 1
+    Title.Text = "⚡ BRM5 UTILITIES"
+    Title.TextColor3 = Colors.accent
+    Title.TextSize = 15
+    Title.Font = Enum.Font.GothamBold
+    Title.TextXAlignment = Enum.TextXAlignment.Left
+    Title.Parent = TopBar
+
+    -- Close Button
+    local CloseBtn = Instance.new("TextButton")
+    CloseBtn.Size = UDim2.new(0, 30, 0, 25)
+    CloseBtn.Position = UDim2.new(1, -35, 0, 5)
+    CloseBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+    CloseBtn.Text = "✕"
+    CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    CloseBtn.TextSize = 14
+    CloseBtn.Font = Enum.Font.GothamBold
+    CloseBtn.BorderSizePixel = 0
+    CloseBtn.Parent = TopBar
+    Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
+
+    -- Minimize Button
     local MinBtn = Instance.new("TextButton")
-    MinBtn.Size = UDim2.new(0, 30, 0, 30)
-    MinBtn.Position = UDim2.new(1, -35, 0, 5)
-    MinBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-    MinBtn.Text = "−"
+    MinBtn.Size = UDim2.new(0, 30, 0, 25)
+    MinBtn.Position = UDim2.new(1, -70, 0, 5)
+    MinBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+    MinBtn.Text = "—"
     MinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    MinBtn.TextSize = 20
+    MinBtn.TextSize = 14
     MinBtn.Font = Enum.Font.GothamBold
     MinBtn.BorderSizePixel = 0
-    MinBtn.Parent = TitleBar
+    MinBtn.Parent = TopBar
+    Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 6)
 
-    local minCorner = Instance.new("UICorner")
-    minCorner.CornerRadius = UDim.new(0, 6)
-    minCorner.Parent = MinBtn
+    -- ══════════════════════════════
+    --  SIDEBAR (TABS)
+    -- ══════════════════════════════
 
-    -- Content Frame
-    local ContentFrame = Instance.new("ScrollingFrame")
-    ContentFrame.Size = UDim2.new(1, -16, 1, -50)
-    ContentFrame.Position = UDim2.new(0, 8, 0, 45)
-    ContentFrame.BackgroundTransparency = 1
-    ContentFrame.ScrollBarThickness = 4
-    ContentFrame.ScrollBarImageColor3 = Color3.fromRGB(0, 180, 255)
-    ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-    ContentFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    ContentFrame.Parent = MainFrame
+    local Sidebar = Instance.new("Frame")
+    Sidebar.Size = UDim2.new(0, 120, 1, -35)
+    Sidebar.Position = UDim2.new(0, 0, 0, 35)
+    Sidebar.BackgroundColor3 = Colors.sidebar
+    Sidebar.BorderSizePixel = 0
+    Sidebar.Parent = Main
 
-    local listLayout = Instance.new("UIListLayout")
-    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    listLayout.Padding = UDim.new(0, 5)
-    listLayout.Parent = ContentFrame
+    local sidebarLayout = Instance.new("UIListLayout")
+    sidebarLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    sidebarLayout.Padding = UDim.new(0, 2)
+    sidebarLayout.Parent = Sidebar
 
-    -- Toggle-Button Funktion
-    local function createToggle(name, key, order, enableFn, disableFn, activeRef)
-        local btnFrame = Instance.new("Frame")
-        btnFrame.Size = UDim2.new(1, 0, 0, 36)
-        btnFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-        btnFrame.BorderSizePixel = 0
-        btnFrame.LayoutOrder = order
-        btnFrame.Parent = ContentFrame
+    local sidebarPad = Instance.new("UIPadding")
+    sidebarPad.PaddingTop = UDim.new(0, 6)
+    sidebarPad.PaddingLeft = UDim.new(0, 4)
+    sidebarPad.PaddingRight = UDim.new(0, 4)
+    sidebarPad.Parent = Sidebar
 
-        local bfCorner = Instance.new("UICorner")
-        bfCorner.CornerRadius = UDim.new(0, 6)
-        bfCorner.Parent = btnFrame
+    -- ══════════════════════════════
+    --  CONTENT AREA
+    -- ══════════════════════════════
+
+    local ContentArea = Instance.new("Frame")
+    ContentArea.Size = UDim2.new(1, -120, 1, -35)
+    ContentArea.Position = UDim2.new(0, 120, 0, 35)
+    ContentArea.BackgroundColor3 = Colors.bg
+    ContentArea.BorderSizePixel = 0
+    ContentArea.ClipsDescendants = true
+    ContentArea.Parent = Main
+
+    -- ══════════════════════════════
+    --  UI HELPER FUNKTIONEN
+    -- ══════════════════════════════
+
+    local allTabBtns = {}
+    local allPages = {}
+    local currentTab = nil
+
+    local function switchTab(name)
+        currentTab = name
+        for tabName, btn in pairs(allTabBtns) do
+            if tabName == name then
+                btn.BackgroundColor3 = Colors.tabActive
+                btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            else
+                btn.BackgroundColor3 = Colors.tabNormal
+                btn.TextColor3 = Colors.textDim
+            end
+        end
+        for pageName, page in pairs(allPages) do
+            page.Visible = (pageName == name)
+        end
+    end
+
+    local function createTab(name, icon, order)
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(1, 0, 0, 32)
+        btn.BackgroundColor3 = Colors.tabNormal
+        btn.Text = icon .. " " .. name
+        btn.TextColor3 = Colors.textDim
+        btn.TextSize = 12
+        btn.Font = Enum.Font.GothamSemibold
+        btn.BorderSizePixel = 0
+        btn.LayoutOrder = order
+        btn.Parent = Sidebar
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+
+        btn.MouseEnter:Connect(function()
+            if currentTab ~= name then
+                btn.BackgroundColor3 = Colors.tabHover
+            end
+        end)
+        btn.MouseLeave:Connect(function()
+            if currentTab ~= name then
+                btn.BackgroundColor3 = Colors.tabNormal
+            end
+        end)
+
+        -- Page
+        local page = Instance.new("ScrollingFrame")
+        page.Name = name
+        page.Size = UDim2.new(1, -16, 1, -16)
+        page.Position = UDim2.new(0, 8, 0, 8)
+        page.BackgroundTransparency = 1
+        page.ScrollBarThickness = 3
+        page.ScrollBarImageColor3 = Colors.accent
+        page.CanvasSize = UDim2.new(0, 0, 0, 0)
+        page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        page.Visible = false
+        page.BorderSizePixel = 0
+        page.Parent = ContentArea
+
+        local layout = Instance.new("UIListLayout")
+        layout.SortOrder = Enum.SortOrder.LayoutOrder
+        layout.Padding = UDim.new(0, 8)
+        layout.Parent = page
+
+        allTabBtns[name] = btn
+        allPages[name] = page
+
+        btn.MouseButton1Click:Connect(function()
+            switchTab(name)
+        end)
+
+        return page
+    end
+
+    local function createSectionLabel(parent, text, order)
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(1, 0, 0, 22)
+        label.BackgroundTransparency = 1
+        label.Text = "  " .. text
+        label.TextColor3 = Colors.accent
+        label.TextSize = 13
+        label.Font = Enum.Font.GothamBold
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.LayoutOrder = order
+        label.Parent = parent
+    end
+
+    local function createToggle(parent, text, order, default, callback)
+        local card = Instance.new("Frame")
+        card.Size = UDim2.new(1, 0, 0, 38)
+        card.BackgroundColor3 = Colors.card
+        card.BorderSizePixel = 0
+        card.LayoutOrder = order
+        card.Parent = parent
+        Instance.new("UICorner", card).CornerRadius = UDim.new(0, 8)
 
         local label = Instance.new("TextLabel")
-        label.Size = UDim2.new(0.65, 0, 1, 0)
-        label.Position = UDim2.new(0, 10, 0, 0)
+        label.Size = UDim2.new(1, -70, 1, 0)
+        label.Position = UDim2.new(0, 12, 0, 0)
         label.BackgroundTransparency = 1
-        label.Text = name .. "  [" .. key .. "]"
-        label.TextColor3 = Color3.fromRGB(200, 200, 200)
+        label.Text = text
+        label.TextColor3 = Colors.text
         label.TextSize = 13
         label.Font = Enum.Font.Gotham
         label.TextXAlignment = Enum.TextXAlignment.Left
-        label.Parent = btnFrame
+        label.Parent = card
 
-        local statusBtn = Instance.new("TextButton")
-        statusBtn.Size = UDim2.new(0, 55, 0, 24)
-        statusBtn.Position = UDim2.new(1, -65, 0.5, -12)
-        statusBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-        statusBtn.Text = "AUS"
-        statusBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-        statusBtn.TextSize = 12
-        statusBtn.Font = Enum.Font.GothamBold
-        statusBtn.BorderSizePixel = 0
-        statusBtn.Parent = btnFrame
+        -- Toggle Button
+        local toggleFrame = Instance.new("Frame")
+        toggleFrame.Size = UDim2.new(0, 44, 0, 22)
+        toggleFrame.Position = UDim2.new(1, -56, 0.5, -11)
+        toggleFrame.BackgroundColor3 = default and Colors.toggleOn or Colors.toggleOff
+        toggleFrame.BorderSizePixel = 0
+        toggleFrame.Parent = card
+        Instance.new("UICorner", toggleFrame).CornerRadius = UDim.new(1, 0)
 
-        local sCorner = Instance.new("UICorner")
-        sCorner.CornerRadius = UDim.new(0, 6)
-        sCorner.Parent = statusBtn
+        local knob = Instance.new("Frame")
+        knob.Size = UDim2.new(0, 18, 0, 18)
+        knob.Position = default and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+        knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        knob.BorderSizePixel = 0
+        knob.Parent = toggleFrame
+        Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
 
-        local function updateVisual(active)
-            if active then
-                statusBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
-                statusBtn.Text = "AN"
-                label.TextColor3 = Color3.fromRGB(0, 255, 100)
-            else
-                statusBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-                statusBtn.Text = "AUS"
-                label.TextColor3 = Color3.fromRGB(200, 200, 200)
+        local active = default
+
+        local clickBtn = Instance.new("TextButton")
+        clickBtn.Size = UDim2.new(1, 0, 1, 0)
+        clickBtn.BackgroundTransparency = 1
+        clickBtn.Text = ""
+        clickBtn.Parent = card
+
+        clickBtn.MouseButton1Click:Connect(function()
+            active = not active
+
+            local goalPos = active and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+            local goalColor = active and Colors.toggleOn or Colors.toggleOff
+
+            TweenService:Create(knob, TweenInfo.new(0.2), {Position = goalPos}):Play()
+            TweenService:Create(toggleFrame, TweenInfo.new(0.2), {BackgroundColor3 = goalColor}):Play()
+
+            if callback then
+                safeCall(callback, active)
             end
+        end)
+
+        return function()
+            active = not active
+            local goalPos = active and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+            local goalColor = active and Colors.toggleOn or Colors.toggleOff
+            TweenService:Create(knob, TweenInfo.new(0.2), {Position = goalPos}):Play()
+            TweenService:Create(toggleFrame, TweenInfo.new(0.2), {BackgroundColor3 = goalColor}):Play()
+            if callback then safeCall(callback, active) end
         end
-
-        local function toggle()
-            local isActive = activeRef()
-            if isActive then
-                disableFn()
-            else
-                enableFn()
-            end
-            updateVisual(not isActive)
-        end
-
-        statusBtn.MouseButton1Click:Connect(toggle)
-
-        return {update = updateVisual, toggle = toggle}
     end
 
-    -- Alle Toggles erstellen
-    local toggles = {}
+    local function createSlider(parent, text, order, min, max, default, callback)
+        local card = Instance.new("Frame")
+        card.Size = UDim2.new(1, 0, 0, 55)
+        card.BackgroundColor3 = Colors.card
+        card.BorderSizePixel = 0
+        card.LayoutOrder = order
+        card.Parent = parent
+        Instance.new("UICorner", card).CornerRadius = UDim.new(0, 8)
 
-    toggles.fullbright = createToggle("Fullbright", "I", 1,
-        enableFullbright, disableFullbright, function() return fullbrightActive end)
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(0.7, 0, 0, 22)
+        label.Position = UDim2.new(0, 12, 0, 4)
+        label.BackgroundTransparency = 1
+        label.Text = text
+        label.TextColor3 = Colors.text
+        label.TextSize = 12
+        label.Font = Enum.Font.Gotham
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.Parent = card
 
-    toggles.esp = createToggle("ESP Highlight", "U", 2,
-        enableESP, disableESP, function() return espActive end)
+        local valueLabel = Instance.new("TextLabel")
+        valueLabel.Size = UDim2.new(0.3, -12, 0, 22)
+        valueLabel.Position = UDim2.new(0.7, 0, 0, 4)
+        valueLabel.BackgroundTransparency = 1
+        valueLabel.Text = tostring(default)
+        valueLabel.TextColor3 = Colors.accent
+        valueLabel.TextSize = 13
+        valueLabel.Font = Enum.Font.GothamBold
+        valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+        valueLabel.Parent = card
 
-    toggles.hitbox = createToggle("Hitbox ESP", "H", 3,
-        enableHitbox, disableHitbox, function() return hitboxActive end)
+        -- Slider Track
+        local track = Instance.new("Frame")
+        track.Size = UDim2.new(1, -24, 0, 8)
+        track.Position = UDim2.new(0, 12, 0, 35)
+        track.BackgroundColor3 = Colors.sliderBg
+        track.BorderSizePixel = 0
+        track.Parent = card
+        Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
 
-    toggles.silentaim = createToggle("Silent Aim", "J", 4,
-        enableSilentAim, disableSilentAim, function() return silentAimActive end)
+        local fill = Instance.new("Frame")
+        local pct = (default - min) / (max - min)
+        fill.Size = UDim2.new(pct, 0, 1, 0)
+        fill.BackgroundColor3 = Colors.sliderFill
+        fill.BorderSizePixel = 0
+        fill.Parent = track
+        Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
 
-    toggles.autoshoot = createToggle("AutoShoot", "K", 5,
-        enableAutoShoot, disableAutoShoot, function() return autoShootActive end)
+        local knob = Instance.new("Frame")
+        knob.Size = UDim2.new(0, 14, 0, 14)
+        knob.Position = UDim2.new(pct, -7, 0.5, -7)
+        knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        knob.BorderSizePixel = 0
+        knob.ZIndex = 3
+        knob.Parent = track
+        Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
 
-    toggles.fly = createToggle("Fly", "F", 6,
-        enableFly, disableFly, function() return flyActive end)
+        -- Slider Input
+        local dragging = false
+        local clickArea = Instance.new("TextButton")
+        clickArea.Size = UDim2.new(1, 0, 0, 20)
+        clickArea.Position = UDim2.new(0, 0, 0, -6)
+        clickArea.BackgroundTransparency = 1
+        clickArea.Text = ""
+        clickArea.ZIndex = 5
+        clickArea.Parent = track
 
-    toggles.potato = createToggle("Potato Graphics", "P", 7,
-        enablePotato, disablePotato, function() return potatoActive end)
+        local function updateSlider(inputX)
+            local trackPos = track.AbsolutePosition.X
+            local trackSize = track.AbsoluteSize.X
+            local relX = math.clamp((inputX - trackPos) / trackSize, 0, 1)
+            local value = math.floor(min + (max - min) * relX)
 
-    -- Minimieren-Logik
-    local minimized = false
-    MinBtn.MouseButton1Click:Connect(function()
-        minimized = not minimized
-        ContentFrame.Visible = not minimized
-        if minimized then
-            MainFrame.Size = UDim2.new(0, 280, 0, 40)
-            MinBtn.Text = "+"
-        else
-            MainFrame.Size = UDim2.new(0, 280, 0, 420)
-            MinBtn.Text = "−"
+            fill.Size = UDim2.new(relX, 0, 1, 0)
+            knob.Position = UDim2.new(relX, -7, 0.5, -7)
+            valueLabel.Text = tostring(value)
+
+            if callback then
+                safeCall(callback, value)
+            end
+        end
+
+        clickArea.MouseButton1Down:Connect(function()
+            dragging = true
+            updateSlider(Mouse.X)
+        end)
+
+        UserInputService.InputChanged:Connect(function(input)
+            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                updateSlider(input.Position.X)
+            end
+        end)
+
+        UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = false
+            end
+        end)
+    end
+
+    local function createInfo(parent, text, order)
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(1, 0, 0, 18)
+        label.BackgroundTransparency = 1
+        label.Text = "  ℹ " .. text
+        label.TextColor3 = Colors.textDim
+        label.TextSize = 11
+        label.Font = Enum.Font.Gotham
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.LayoutOrder = order
+        label.Parent = parent
+    end
+
+    -- ══════════════════════════════
+    --  TABS ERSTELLEN
+    -- ══════════════════════════════
+
+    -- TAB 1: VISUALS
+    local visualsPage = createTab("Visuals", "👁", 1)
+
+    createSectionLabel(visualsPage, "RENDERING", 1)
+
+    local toggleFullbright = createToggle(visualsPage, "Fullbright", 2, false, function(on)
+        if on then enableFullbright() else disableFullbright() end
+    end)
+
+    local togglePotato = createToggle(visualsPage, "Potato Graphics", 3, false, function(on)
+        if on then enablePotato() else disablePotato() end
+    end)
+
+    createSlider(visualsPage, "Brightness", 4, 0, 5, 2, function(val)
+        Config.Brightness = val
+        if States.fullbright then applyFullbright() end
+    end)
+
+    createSlider(visualsPage, "Clock Time", 5, 0, 24, 14, function(val)
+        Config.ClockTime = val
+        if States.fullbright then applyFullbright() end
+    end)
+
+    createInfo(visualsPage, "Fullbright = Taste [I] | Potato = Taste [P]", 6)
+
+    -- TAB 2: ESP
+    local espPage = createTab("ESP", "📡", 2)
+
+    createSectionLabel(espPage, "ESP HIGHLIGHTS", 1)
+
+    local toggleESP = createToggle(espPage, "ESP Highlight", 2, false, function(on)
+        if on then enableESP() else disableESP() end
+    end)
+
+    createSlider(espPage, "Fill Transparency", 3, 0, 100, 85, function(val)
+        Config.ESP_FillTransparency = val / 100
+        -- Live update
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj:IsA("Highlight") and obj.Name == "BRM5_ESP" then
+                obj.FillTransparency = Config.ESP_FillTransparency
+            end
         end
     end)
 
-    -- Info-Label
-    local infoLabel = Instance.new("TextLabel")
-    infoLabel.Size = UDim2.new(1, 0, 0, 25)
-    infoLabel.BackgroundTransparency = 1
-    infoLabel.Text = "Drücke T um GUI zu togglen"
-    infoLabel.TextColor3 = Color3.fromRGB(100, 100, 100)
-    infoLabel.TextSize = 11
-    infoLabel.Font = Enum.Font.Gotham
-    infoLabel.LayoutOrder = 99
-    infoLabel.Parent = ContentFrame
+    createSlider(espPage, "Outline Transparency", 4, 0, 100, 10, function(val)
+        Config.ESP_OutlineTransparency = val / 100
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj:IsA("Highlight") and obj.Name == "BRM5_ESP" then
+                obj.OutlineTransparency = Config.ESP_OutlineTransparency
+            end
+        end
+    end)
 
-    return ScreenGui, toggles
+    createSectionLabel(espPage, "HITBOX", 5)
+
+    local toggleHitbox = createToggle(espPage, "Hitbox Expander", 6, false, function(on)
+        if on then enableHitbox() else disableHitbox() end
+    end)
+
+    createSlider(espPage, "Hitbox Size", 7, 5, 30, 10, function(val)
+        Config.HitboxSize = val
+        -- Live update
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj:IsA("Part") and obj.Name == "BRM5_Hitbox" then
+                obj.Size = Vector3.new(val, val, val)
+            end
+        end
+    end)
+
+    createSlider(espPage, "Hitbox Transparency", 8, 0, 100, 70, function(val)
+        Config.HitboxTransparency = val / 100
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj:IsA("Part") and obj.Name == "BRM5_Hitbox" then
+                obj.Transparency = Config.HitboxTransparency
+            end
+        end
+    end)
+
+    createInfo(espPage, "ESP = Taste [U] | Hitbox = Taste [H]", 9)
+
+    -- TAB 3: AIM
+    local aimPage = createTab("Aim", "🎯", 3)
+
+    createSectionLabel(aimPage, "SILENT AIM", 1)
+
+    local toggleSilent = createToggle(aimPage, "Silent Aim", 2, false, function(on)
+        if on then enableSilentAim() else disableSilentAim() end
+    end)
+
+    createSlider(aimPage, "Aim Radius (px)", 3, 50, 500, 200, function(val)
+        Config.SilentAimRadius = val
+    end)
+
+    createSectionLabel(aimPage, "AUTO SHOOT", 4)
+
+    local toggleAutoShoot = createToggle(aimPage, "Auto Shoot", 5, false, function(on)
+        if on then enableAutoShoot() else disableAutoShoot() end
+    end)
+
+    createSlider(aimPage, "Shoot Delay (ms)", 6, 50, 500, 150, function(val)
+        Config.AutoShootDelay = val / 1000
+    end)
+
+    createInfo(aimPage, "Silent Aim = Taste [J] | AutoShoot = Taste [K]", 7)
+    createInfo(aimPage, "Silent Aim benötigt hookmetamethod", 8)
+
+    -- TAB 4: MOVEMENT
+    local movePage = createTab("Move", "🚀", 4)
+
+    createSectionLabel(movePage, "FLY", 1)
+
+    local toggleFly = createToggle(movePage, "Fly Modus", 2, false, function(on)
+        if on then enableFly() else disableFly() end
+    end)
+
+    createSlider(movePage, "Fly Speed", 3, 10, 300, 80, function(val)
+        Config.FlySpeed = val
+    end)
+
+    createInfo(movePage, "Fly = Taste [F]", 4)
+    createInfo(movePage, "WASD = Bewegung | Space = Hoch | Ctrl = Runter", 5)
+
+    -- TAB 5: SETTINGS
+    local settingsPage = createTab("Info", "⚙", 5)
+
+    createSectionLabel(settingsPage, "TASTENBELEGUNG", 1)
+    createInfo(settingsPage, "[I] = Fullbright Ein/Aus", 2)
+    createInfo(settingsPage, "[U] = ESP Ein/Aus", 3)
+    createInfo(settingsPage, "[H] = Hitbox Ein/Aus", 4)
+    createInfo(settingsPage, "[J] = Silent Aim Ein/Aus", 5)
+    createInfo(settingsPage, "[K] = AutoShoot Ein/Aus", 6)
+    createInfo(settingsPage, "[F] = Fly Ein/Aus", 7)
+    createInfo(settingsPage, "[P] = Potato Graphics Ein/Aus", 8)
+    createInfo(settingsPage, "[T] = GUI Ein/Ausblenden", 9)
+
+    createSectionLabel(settingsPage, "INFO", 10)
+    createInfo(settingsPage, "BRM5 Utilities v2 - Stable Build", 11)
+    createInfo(settingsPage, "Alle Features sind einzeln einstellbar", 12)
+
+    -- ══════════════════════════════
+    --  INITIAL TAB
+    -- ══════════════════════════════
+
+    switchTab("Visuals")
+
+    -- ══════════════════════════════
+    --  CLOSE / MINIMIZE
+    -- ══════════════════════════════
+
+    CloseBtn.MouseButton1Click:Connect(function()
+        Main.Visible = not Main.Visible
+    end)
+
+    local minimized = false
+    MinBtn.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        if minimized then
+            Main.Size = UDim2.new(0, 520, 0, 35)
+            MinBtn.Text = "+"
+        else
+            Main.Size = UDim2.new(0, 520, 0, 380)
+            MinBtn.Text = "—"
+        end
+    end)
+
+    return {
+        gui = ScreenGui,
+        main = Main,
+        toggles = {
+            fullbright = toggleFullbright,
+            esp = toggleESP,
+            hitbox = toggleHitbox,
+            silentaim = toggleSilent,
+            autoshoot = toggleAutoShoot,
+            fly = toggleFly,
+            potato = togglePotato,
+        }
+    }
 end
 
-local gui, toggles = createGUI()
+local UI = BuildUI()
 
 -- ══════════════════════════════════════
 --  KEYBINDS
 -- ══════════════════════════════════════
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if UserInputService:GetFocusedTextBox() then return end
     if gameProcessed then return end
+    if UserInputService:GetFocusedTextBox() then return end
 
     if input.KeyCode == Enum.KeyCode.I then
-        toggles.fullbright.toggle()
-
+        UI.toggles.fullbright()
     elseif input.KeyCode == Enum.KeyCode.U then
-        toggles.esp.toggle()
-
+        UI.toggles.esp()
     elseif input.KeyCode == Enum.KeyCode.H then
-        toggles.hitbox.toggle()
-
+        UI.toggles.hitbox()
     elseif input.KeyCode == Enum.KeyCode.J then
-        toggles.silentaim.toggle()
-
+        UI.toggles.silentaim()
     elseif input.KeyCode == Enum.KeyCode.K then
-        toggles.autoshoot.toggle()
-
+        UI.toggles.autoshoot()
     elseif input.KeyCode == Enum.KeyCode.F then
-        toggles.fly.toggle()
-
+        UI.toggles.fly()
     elseif input.KeyCode == Enum.KeyCode.P then
-        toggles.potato.toggle()
-
+        UI.toggles.potato()
     elseif input.KeyCode == Enum.KeyCode.T then
-        -- GUI ein/ausblenden
-        if gui then
-            local main = gui:FindFirstChild("MainFrame")
-            if main then
-                main.Visible = not main.Visible
-            end
-        end
+        UI.main.Visible = not UI.main.Visible
     end
 end)
 
 -- ══════════════════════════════════════
---  RESPAWN-HANDLER
+--  RESPAWN HANDLER
 -- ══════════════════════════════════════
 
-LocalPlayer.CharacterAdded:Connect(function(char)
-    task.wait(1)
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1.5)
 
-    -- Fly muss bei Respawn neu angewendet werden
-    if flyActive then
-        flyActive = false
-        if flyConn then flyConn:Disconnect(); flyConn = nil end
-        if flyBody then flyBody:Destroy(); flyBody = nil end
-        if flyGyro then flyGyro:Destroy(); flyGyro = nil end
-        task.wait(0.5)
+    if States.fly then
+        disableFly()
+        task.wait(0.3)
         enableFly()
     end
 
-    -- ESP und Hitbox automatisch auf neuen Character anwenden
-    if espActive then
-        task.wait(0.5)
-        scanAndApplyESP(Workspace)
+    if States.esp then
+        task.defer(function()
+            task.wait(0.5)
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj:IsA("Model") then applyESP(obj) end
+            end
+        end)
     end
 
-    if hitboxActive then
-        task.wait(0.5)
-        for _, obj in pairs(Workspace:GetDescendants()) do
-            if obj:IsA("Model") then
-                pcall(function() applyHitboxToModel(obj) end)
+    if States.hitbox then
+        task.defer(function()
+            task.wait(0.5)
+            for _, obj in pairs(Workspace:GetDescendants()) do
+                if obj:IsA("Model") then applyHitbox(obj) end
             end
-        end
+        end)
     end
 end)
 
 LocalPlayer.CharacterRemoving:Connect(function()
-    if flyBody then flyBody:Destroy(); flyBody = nil end
-    if flyGyro then flyGyro:Destroy(); flyGyro = nil end
-    if flyConn then flyConn:Disconnect(); flyConn = nil end
+    if flyBody then pcall(function() flyBody:Destroy() end) flyBody = nil end
+    if flyGyro then pcall(function() flyGyro:Destroy() end) flyGyro = nil end
 end)
 
 -- ══════════════════════════════════════
---  INITIALISIERUNG
+--  FERTIG
 -- ══════════════════════════════════════
 
-RemoveGrassMaterial()
-
-print("══════════════════════════════════════")
-print("  BRM5 UTILITIES GELADEN")
-print("══════════════════════════════════════")
-print("  [I] Fullbright")
-print("  [U] ESP Highlight")
-print("  [H] Hitbox ESP")
-print("  [J] Silent Aim")
-print("  [K] AutoShoot")
-print("  [F] Fly")
-print("  [P] Potato Graphics")
-print("  [T] GUI Toggle")
-print("══════════════════════════════════════")
+print("═══════════════════════════════════")
+print("  BRM5 UTILITIES v2 - GELADEN")
+print("  Drücke [T] um GUI zu togglen")
+print("═══════════════════════════════════")
