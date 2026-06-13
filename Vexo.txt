@@ -1,0 +1,1098 @@
+-- ══════════════════════════════════════════════════════════════
+--   BRM5 FULL UTILITIES
+--   Features: Potato Graphics, Hitbox ESP Sky, Silent Aim,
+--             Autoshoot, Fly, Fullbright, No-Fog, Material Fix
+-- ══════════════════════════════════════════════════════════════
+
+local Lighting         = game:GetService("Lighting")
+local Players          = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local Workspace        = game:GetService("Workspace")
+local MaterialService  = game:GetService("MaterialService")
+local RunService       = game:GetService("RunService")
+local Camera           = Workspace.CurrentCamera
+
+local LocalPlayer = Players.LocalPlayer
+local Mouse       = LocalPlayer:GetMouse()
+
+-- ══════════════════════════════════════
+--  EINSTELLUNGEN / KONFIGURATION
+-- ══════════════════════════════════════
+
+local Config = {
+    -- Fullbright
+    Brightness     = 2,
+    ClockTime      = 14,
+    Ambient        = Color3.fromRGB(178, 178, 178),
+    OutdoorAmbient = Color3.fromRGB(178, 178, 178),
+    GlobalShadows  = false,
+    FogStart       = 100000,
+    FogEnd         = 100000,
+
+    -- ESP
+    ESP_FillColor           = Color3.fromRGB(255, 255, 0),
+    ESP_FillTransparency    = 0.9,
+    ESP_OutlineColor        = Color3.fromRGB(0, 255, 0),
+    ESP_OutlineTransparency = 0.2,
+
+    -- Hitbox
+    HitboxSize = Vector3.new(12, 12, 12),
+    HitboxTransparency = 0.7,
+    HitboxColor = BrickColor.new("Really red"),
+
+    -- Silent Aim
+    SilentAimRadius = 250,  -- Pixel-Radius auf dem Bildschirm
+
+    -- Fly
+    FlySpeed = 80,
+
+    -- Potato Graphics
+    PotatoRenderDistance = 200,
+    PotatoQuality = 1,
+}
+
+-- ══════════════════════════════════════
+--  ORIGINAL-WERTE SICHERN
+-- ══════════════════════════════════════
+
+local Original = {
+    Brightness     = Lighting.Brightness,
+    ClockTime      = Lighting.ClockTime,
+    Ambient        = Lighting.Ambient,
+    OutdoorAmbient = Lighting.OutdoorAmbient,
+    GlobalShadows  = Lighting.GlobalShadows,
+    FogStart       = Lighting.FogStart,
+    FogEnd         = Lighting.FogEnd,
+}
+
+-- ══════════════════════════════════════
+--  ZUSTANDS-VARIABLEN
+-- ══════════════════════════════════════
+
+local originalAtmospheres = {}
+local lightingConns       = {}
+local espConn             = nil
+local fullbrightActive    = false
+local espActive           = false
+local applying            = false
+local noFogActive         = true
+
+local hitboxActive     = false
+local silentAimActive  = false
+local autoShootActive  = false
+local flyActive        = false
+local potatoActive     = false
+
+local flyBody          = nil
+local flyGyro          = nil
+local flyConn          = nil
+
+local silentAimConn    = nil
+local autoShootConn    = nil
+local hitboxConns      = {}
+local potatoOriginals  = {}
+
+-- ══════════════════════════════════════
+--  HILFSFUNKTIONEN
+-- ══════════════════════════════════════
+
+local atmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
+local originalDensity = atmosphere and atmosphere.Density or 0
+
+local function getEnemyModels()
+    local enemies = {}
+    for _, obj in pairs(Workspace:GetChildren()) do
+        if obj:IsA("Model") and obj ~= LocalPlayer.Character then
+            if obj.Name == "Male" or obj.Name == "Model" or obj:FindFirstChild("Humanoid") then
+                local hum = obj:FindFirstChildOfClass("Humanoid")
+                if hum and hum.Health > 0 then
+                    table.insert(enemies, obj)
+                end
+            end
+        end
+    end
+    -- Auch in verschachtelten Ordnern suchen
+    for _, folder in pairs(Workspace:GetChildren()) do
+        if folder:IsA("Folder") or folder:IsA("Model") then
+            for _, obj in pairs(folder:GetChildren()) do
+                if obj:IsA("Model") and obj ~= LocalPlayer.Character then
+                    if obj.Name == "Male" or obj.Name == "Model" or obj:FindFirstChild("Humanoid") then
+                        local hum = obj:FindFirstChildOfClass("Humanoid")
+                        if hum and hum.Health > 0 then
+                            table.insert(enemies, obj)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return enemies
+end
+
+local function getClosestEnemyToMouse()
+    local closest = nil
+    local closestDist = Config.SilentAimRadius
+    local enemies = getEnemyModels()
+
+    for _, enemy in pairs(enemies) do
+        local head = enemy:FindFirstChild("Head") or enemy:FindFirstChild("HumanoidRootPart")
+        if head then
+            local screenPos, onScreen = Camera:WorldToScreenPoint(head.Position)
+            if onScreen then
+                local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+                local targetPos = Vector2.new(screenPos.X, screenPos.Y)
+                local dist = (mousePos - targetPos).Magnitude
+                if dist < closestDist then
+                    closestDist = dist
+                    closest = enemy
+                end
+            end
+        end
+    end
+    return closest
+end
+
+local function getClosestEnemy()
+    local closest = nil
+    local closestDist = math.huge
+    local myChar = LocalPlayer.Character
+    if not myChar then return nil end
+    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+
+    local enemies = getEnemyModels()
+    for _, enemy in pairs(enemies) do
+        local root = enemy:FindFirstChild("HumanoidRootPart") or enemy:FindFirstChild("Head")
+        if root then
+            local dist = (myRoot.Position - root.Position).Magnitude
+            if dist < closestDist then
+                closestDist = dist
+                closest = enemy
+            end
+        end
+    end
+    return closest
+end
+
+-- ══════════════════════════════════════
+--  ZENTRALE FOG-STEUERUNG
+-- ══════════════════════════════════════
+
+local function applyFogState()
+    if noFogActive or fullbrightActive then
+        Lighting.FogStart = 999999
+        Lighting.FogEnd   = 999999
+        if atmosphere then atmosphere.Density = 0 end
+    else
+        Lighting.FogStart = Original.FogStart
+        Lighting.FogEnd   = Original.FogEnd
+        if atmosphere then atmosphere.Density = originalDensity end
+    end
+end
+
+-- ══════════════════════════════════════
+--  FULLBRIGHT LOGIK
+-- ══════════════════════════════════════
+
+local function applyFullbright()
+    if applying then return end
+    applying = true
+    Lighting.Brightness     = Config.Brightness
+    Lighting.ClockTime      = Config.ClockTime
+    Lighting.Ambient        = Config.Ambient
+    Lighting.OutdoorAmbient = Config.OutdoorAmbient
+    Lighting.GlobalShadows  = Config.GlobalShadows
+    applyFogState()
+    applying = false
+end
+
+local function tweakAtmosphere(obj)
+    if obj and obj:IsA("Atmosphere") then
+        if not originalAtmospheres[obj] then
+            originalAtmospheres[obj] = obj.Density
+        end
+        obj.Density = 0
+    end
+end
+
+local function restoreLighting()
+    applying = true
+    Lighting.Brightness     = Original.Brightness
+    Lighting.ClockTime      = Original.ClockTime
+    Lighting.Ambient        = Original.Ambient
+    Lighting.OutdoorAmbient = Original.OutdoorAmbient
+    Lighting.GlobalShadows  = Original.GlobalShadows
+
+    for atmos, density in pairs(originalAtmospheres) do
+        if atmos and atmos.Parent then
+            atmos.Density = density
+        end
+    end
+
+    applyFogState()
+    applying = false
+end
+
+local function enableFullbright()
+    if fullbrightActive then return end
+    fullbrightActive = true
+
+    for _, child in ipairs(Lighting:GetChildren()) do
+        tweakAtmosphere(child)
+    end
+    applyFullbright()
+
+    local watchedProps = {"Brightness", "ClockTime", "Ambient", "OutdoorAmbient", "GlobalShadows", "FogStart", "FogEnd"}
+    for _, prop in ipairs(watchedProps) do
+        table.insert(lightingConns, Lighting:GetPropertyChangedSignal(prop):Connect(applyFullbright))
+    end
+    table.insert(lightingConns, Lighting.ChildAdded:Connect(tweakAtmosphere))
+    print("[Fullbright] Aktiviert")
+end
+
+local function disableFullbright()
+    if not fullbrightActive then return end
+    fullbrightActive = false
+
+    for _, c in ipairs(lightingConns) do c:Disconnect() end
+    lightingConns = {}
+
+    restoreLighting()
+    print("[Fullbright] Deaktiviert")
+end
+
+-- ══════════════════════════════════════
+--  ESP HIGHLIGHT LOGIK (aus deinem System)
+-- ══════════════════════════════════════
+
+local function applyHighlight(object)
+    if not object:IsA("Model") then return end
+    if object.Name ~= "Male" and object.Name ~= "Model" and not object:FindFirstChild("Humanoid") then return end
+    if object:FindFirstChildOfClass("Highlight") then return end
+    if object == LocalPlayer.Character then return end
+
+    local highlight = Instance.new("Highlight")
+    highlight.Adornee             = object
+    highlight.FillColor           = Config.ESP_FillColor
+    highlight.FillTransparency    = Config.ESP_FillTransparency
+    highlight.OutlineColor        = Config.ESP_OutlineColor
+    highlight.OutlineTransparency = Config.ESP_OutlineTransparency
+    highlight.DepthMode           = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent              = object
+end
+
+local function scanAndApplyESP(parent)
+    for _, obj in pairs(parent:GetChildren()) do
+        applyHighlight(obj)
+        if obj:IsA("Folder") or (obj:IsA("Model") and not obj:FindFirstChild("Humanoid")) then
+            scanAndApplyESP(obj)
+        end
+    end
+end
+
+local function enableESP()
+    if espActive then return end
+    espActive = true
+
+    scanAndApplyESP(Workspace)
+
+    espConn = Workspace.DescendantAdded:Connect(function(obj)
+        if espActive then
+            task.wait(0.2)
+            if obj:IsA("Model") then
+                applyHighlight(obj)
+            elseif obj.Parent and obj.Parent:IsA("Model") then
+                applyHighlight(obj.Parent)
+            end
+        end
+    end)
+    print("[ESP] Aktiviert")
+end
+
+local function disableESP()
+    if not espActive then return end
+    espActive = false
+
+    if espConn then
+        espConn:Disconnect()
+        espConn = nil
+    end
+
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        if obj:IsA("Highlight") and obj.Name == "Highlight" then
+            obj:Destroy()
+        end
+    end
+    print("[ESP] Deaktiviert")
+end
+
+-- ══════════════════════════════════════
+--  HITBOX EXPANDER (SKY / Sichtbar)
+-- ══════════════════════════════════════
+
+local function applyHitboxToModel(model)
+    if not model:IsA("Model") then return end
+    if model == LocalPlayer.Character then return end
+    if model.Name ~= "Male" and model.Name ~= "Model" and not model:FindFirstChild("Humanoid") then return end
+
+    local head = model:FindFirstChild("Head")
+    if not head then return end
+
+    local hum = model:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return end
+
+    -- Hitbox-Part erstellen oder aktualisieren
+    local hitboxPart = head:FindFirstChild("HitboxExpander")
+    if not hitboxPart then
+        hitboxPart = Instance.new("Part")
+        hitboxPart.Name = "HitboxExpander"
+        hitboxPart.Anchored = false
+        hitboxPart.CanCollide = false
+        hitboxPart.Massless = true
+        hitboxPart.Shape = Enum.PartType.Block
+        hitboxPart.Material = Enum.Material.ForceField
+        hitboxPart.Parent = head
+
+        local weld = Instance.new("Weld")
+        weld.Part0 = head
+        weld.Part1 = hitboxPart
+        weld.C0 = CFrame.new(0, 0, 0)
+        weld.Parent = hitboxPart
+    end
+
+    hitboxPart.Size = Config.HitboxSize
+    hitboxPart.Transparency = Config.HitboxTransparency
+    hitboxPart.BrickColor = Config.HitboxColor
+end
+
+local function enableHitbox()
+    if hitboxActive then return end
+    hitboxActive = true
+
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        if obj:IsA("Model") then
+            pcall(function() applyHitboxToModel(obj) end)
+        end
+    end
+
+    local conn = Workspace.DescendantAdded:Connect(function(obj)
+        if hitboxActive then
+            task.wait(0.3)
+            if obj:IsA("Model") then
+                pcall(function() applyHitboxToModel(obj) end)
+            elseif obj.Parent and obj.Parent:IsA("Model") then
+                pcall(function() applyHitboxToModel(obj.Parent) end)
+            end
+        end
+    end)
+    table.insert(hitboxConns, conn)
+
+    -- Kontinuierlich Hitboxen aktualisieren (für neu-spawnende Feinde)
+    local updateConn = RunService.Heartbeat:Connect(function()
+        if not hitboxActive then return end
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj:IsA("Model") then
+                pcall(function() applyHitboxToModel(obj) end)
+            end
+        end
+    end)
+    table.insert(hitboxConns, updateConn)
+
+    print("[Hitbox ESP] Aktiviert - Größe: " .. tostring(Config.HitboxSize))
+end
+
+local function disableHitbox()
+    if not hitboxActive then return end
+    hitboxActive = false
+
+    for _, c in ipairs(hitboxConns) do c:Disconnect() end
+    hitboxConns = {}
+
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        if obj:IsA("Part") and obj.Name == "HitboxExpander" then
+            obj:Destroy()
+        end
+    end
+    print("[Hitbox ESP] Deaktiviert")
+end
+
+-- ══════════════════════════════════════
+--  SILENT AIM
+-- ══════════════════════════════════════
+
+local function enableSilentAim()
+    if silentAimActive then return end
+    silentAimActive = true
+
+    -- Namespace-Hook für den Maus-Hit
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
+        if silentAimActive then
+            if method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRay" or method == "Raycast" then
+                local target = getClosestEnemyToMouse()
+                if target then
+                    local head = target:FindFirstChild("Head") or target:FindFirstChild("HumanoidRootPart")
+                    if head then
+                        local args = {...}
+                        if method == "Raycast" then
+                            -- Workspace:Raycast
+                            local origin = args[1]
+                            if typeof(origin) == "Vector3" then
+                                local dir = (head.Position - origin).Unit * 1000
+                                args[2] = dir
+                                return oldNamecall(self, unpack(args))
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        return oldNamecall(self, ...)
+    end)
+
+    -- Index-Hook für Mouse.Hit und Mouse.Target
+    local oldIndex
+    oldIndex = hookmetamethod(game, "__index", function(self, key)
+        if silentAimActive then
+            if self == Mouse then
+                local target = getClosestEnemyToMouse()
+                if target then
+                    local head = target:FindFirstChild("Head") or target:FindFirstChild("HumanoidRootPart")
+                    if head then
+                        if key == "Hit" then
+                            return head.CFrame
+                        elseif key == "Target" then
+                            return head
+                        end
+                    end
+                end
+            end
+        end
+        return oldIndex(self, key)
+    end)
+
+    print("[Silent Aim] Aktiviert - Radius: " .. Config.SilentAimRadius .. "px")
+end
+
+local function disableSilentAim()
+    if not silentAimActive then return end
+    silentAimActive = false
+    print("[Silent Aim] Deaktiviert")
+end
+
+-- ══════════════════════════════════════
+--  AUTOSHOOT
+-- ══════════════════════════════════════
+
+local function enableAutoShoot()
+    if autoShootActive then return end
+    autoShootActive = true
+
+    autoShootConn = RunService.Heartbeat:Connect(function()
+        if not autoShootActive then return end
+
+        local target = getClosestEnemyToMouse()
+        if target then
+            local head = target:FindFirstChild("Head") or target:FindFirstChild("HumanoidRootPart")
+            if head then
+                local screenPos, onScreen = Camera:WorldToScreenPoint(head.Position)
+                if onScreen then
+                    local mousePos = Vector2.new(Mouse.X, Mouse.Y)
+                    local targetPos = Vector2.new(screenPos.X, screenPos.Y)
+                    local dist = (mousePos - targetPos).Magnitude
+
+                    if dist < Config.SilentAimRadius then
+                        -- Simuliere Mausklick
+                        mouse1press()
+                        task.wait(0.05)
+                        mouse1release()
+                    end
+                end
+            end
+        end
+    end)
+
+    print("[AutoShoot] Aktiviert")
+end
+
+local function disableAutoShoot()
+    if not autoShootActive then return end
+    autoShootActive = false
+
+    if autoShootConn then
+        autoShootConn:Disconnect()
+        autoShootConn = nil
+    end
+    print("[AutoShoot] Deaktiviert")
+end
+
+-- ══════════════════════════════════════
+--  FLY
+-- ══════════════════════════════════════
+
+local function enableFly()
+    if flyActive then return end
+    flyActive = true
+
+    local character = LocalPlayer.Character
+    if not character then
+        print("[Fly] Kein Character gefunden!")
+        flyActive = false
+        return
+    end
+
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not rootPart or not humanoid then
+        print("[Fly] HumanoidRootPart/Humanoid fehlt!")
+        flyActive = false
+        return
+    end
+
+    -- BodyVelocity für Bewegung
+    flyBody = Instance.new("BodyVelocity")
+    flyBody.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    flyBody.Velocity = Vector3.new(0, 0, 0)
+    flyBody.Parent = rootPart
+
+    -- BodyGyro für Rotation
+    flyGyro = Instance.new("BodyGyro")
+    flyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+    flyGyro.D = 200
+    flyGyro.P = 40000
+    flyGyro.Parent = rootPart
+
+    flyConn = RunService.Heartbeat:Connect(function()
+        if not flyActive then return end
+        if not rootPart or not rootPart.Parent then
+            disableFly()
+            return
+        end
+
+        local direction = Vector3.new(0, 0, 0)
+        local speed = Config.FlySpeed
+
+        local camCF = Camera.CFrame
+        local camLook = camCF.LookVector
+        local camRight = camCF.RightVector
+
+        -- WASD-Steuerung
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+            direction = direction + camLook
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+            direction = direction - camLook
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+            direction = direction - camRight
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+            direction = direction + camRight
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+            direction = direction + Vector3.new(0, 1, 0)
+        end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+            direction = direction - Vector3.new(0, 1, 0)
+        end
+
+        if direction.Magnitude > 0 then
+            direction = direction.Unit
+        end
+
+        flyBody.Velocity = direction * speed
+        flyGyro.CFrame = camCF
+    end)
+
+    print("[Fly] Aktiviert - Speed: " .. Config.FlySpeed)
+end
+
+local function disableFly()
+    if not flyActive then return end
+    flyActive = false
+
+    if flyConn then
+        flyConn:Disconnect()
+        flyConn = nil
+    end
+
+    if flyBody then
+        flyBody:Destroy()
+        flyBody = nil
+    end
+
+    if flyGyro then
+        flyGyro:Destroy()
+        flyGyro = nil
+    end
+
+    print("[Fly] Deaktiviert")
+end
+
+-- ══════════════════════════════════════
+--  POTATO GRAPHICS
+-- ══════════════════════════════════════
+
+local function enablePotato()
+    if potatoActive then return end
+    potatoActive = true
+
+    -- Grafikqualität minimieren
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+    end)
+
+    -- Alle Texturen und Meshes vereinfachen
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        pcall(function()
+            if obj:IsA("Decal") or obj:IsA("Texture") then
+                if not potatoOriginals[obj] then
+                    potatoOriginals[obj] = {Transparency = obj.Transparency}
+                end
+                obj.Transparency = 1
+            elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam") then
+                if not potatoOriginals[obj] then
+                    potatoOriginals[obj] = {Enabled = obj.Enabled}
+                end
+                obj.Enabled = false
+            elseif obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+                if not potatoOriginals[obj] then
+                    potatoOriginals[obj] = {Enabled = obj.Enabled}
+                end
+                obj.Enabled = false
+            elseif obj:IsA("MeshPart") then
+                if not potatoOriginals[obj] then
+                    potatoOriginals[obj] = {
+                        Material = obj.Material,
+                        TextureID = obj.TextureID
+                    }
+                end
+                obj.Material = Enum.Material.SmoothPlastic
+                obj.TextureID = ""
+            elseif obj:IsA("BasePart") then
+                if not potatoOriginals[obj] then
+                    potatoOriginals[obj] = {Material = obj.Material}
+                end
+                obj.Material = Enum.Material.SmoothPlastic
+            elseif obj:IsA("PostEffect") then
+                if not potatoOriginals[obj] then
+                    potatoOriginals[obj] = {Enabled = obj.Enabled}
+                end
+                obj.Enabled = false
+            end
+        end)
+    end
+
+    -- Post-Processing deaktivieren
+    for _, effect in pairs(Lighting:GetChildren()) do
+        pcall(function()
+            if effect:IsA("PostEffect") then
+                if not potatoOriginals[effect] then
+                    potatoOriginals[effect] = {Enabled = effect.Enabled}
+                end
+                effect.Enabled = false
+            end
+        end)
+    end
+
+    -- Schatten und Licht-Effekte minimieren
+    for _, obj in pairs(Workspace:GetDescendants()) do
+        pcall(function()
+            if obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
+                if not potatoOriginals[obj] then
+                    potatoOriginals[obj] = {
+                        Enabled = obj.Enabled,
+                        Shadows = obj.Shadows
+                    }
+                end
+                obj.Shadows = false
+            end
+        end)
+    end
+
+    -- Terrain vereinfachen
+    local terrain = Workspace:FindFirstChildOfClass("Terrain")
+    if terrain then
+        pcall(function()
+            terrain.WaterWaveSize = 0
+            terrain.WaterWaveSpeed = 0
+            terrain.WaterReflectance = 0
+            terrain.WaterTransparency = 0
+            sethiddenproperty(terrain, "Decoration", false)
+        end)
+    end
+
+    print("[Potato Graphics] Aktiviert - Minimale Grafik")
+end
+
+local function disablePotato()
+    if not potatoActive then return end
+    potatoActive = false
+
+    -- Alle originalen Werte wiederherstellen
+    for obj, origData in pairs(potatoOriginals) do
+        pcall(function()
+            if obj and obj.Parent then
+                for prop, val in pairs(origData) do
+                    obj[prop] = val
+                end
+            end
+        end)
+    end
+    potatoOriginals = {}
+
+    pcall(function()
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+    end)
+
+    print("[Potato Graphics] Deaktiviert")
+end
+
+-- ══════════════════════════════════════
+--  MATERIAL-FIX
+-- ══════════════════════════════════════
+
+local function RemoveGrassMaterial()
+    pcall(function()
+        MaterialService.Use2022Materials = false
+    end)
+
+    local terrain = Workspace:FindFirstChildOfClass("Terrain")
+    if terrain then
+        pcall(function()
+            terrain.WaterWaveSize  = 0
+            terrain.WaterWaveSpeed = 0
+            sethiddenproperty(terrain, "Decoration", false)
+        end)
+    end
+    print("[MaterialFix] Bodenmaterialien wurden angepasst!")
+end
+
+-- ══════════════════════════════════════
+--  NO-FOG SYSTEM
+-- ══════════════════════════════════════
+
+applyFogState()
+
+Lighting:GetPropertyChangedSignal("FogStart"):Connect(function()
+    if applying then return end
+    applyFogState()
+end)
+Lighting:GetPropertyChangedSignal("FogEnd"):Connect(function()
+    if applying then return end
+    applyFogState()
+end)
+if atmosphere then
+    atmosphere:GetPropertyChangedSignal("Density"):Connect(function()
+        if applying then return end
+        applyFogState()
+    end)
+end
+
+-- ══════════════════════════════════════
+--  GUI ERSTELLEN
+-- ══════════════════════════════════════
+
+local function createGUI()
+    -- Alte GUI entfernen falls vorhanden
+    local existing = LocalPlayer.PlayerGui:FindFirstChild("BRM5_Utilities")
+    if existing then existing:Destroy() end
+
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "BRM5_Utilities"
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    ScreenGui.Parent = LocalPlayer.PlayerGui
+
+    -- Hauptrahmen
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Name = "MainFrame"
+    MainFrame.Size = UDim2.new(0, 280, 0, 420)
+    MainFrame.Position = UDim2.new(0, 15, 0.5, -210)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+    MainFrame.BorderSizePixel = 0
+    MainFrame.Active = true
+    MainFrame.Draggable = true
+    MainFrame.Parent = ScreenGui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = MainFrame
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(0, 180, 255)
+    stroke.Thickness = 2
+    stroke.Parent = MainFrame
+
+    -- Titel
+    local TitleBar = Instance.new("Frame")
+    TitleBar.Size = UDim2.new(1, 0, 0, 40)
+    TitleBar.BackgroundColor3 = Color3.fromRGB(0, 120, 200)
+    TitleBar.BorderSizePixel = 0
+    TitleBar.Parent = MainFrame
+
+    local titleCorner = Instance.new("UICorner")
+    titleCorner.CornerRadius = UDim.new(0, 8)
+    titleCorner.Parent = TitleBar
+
+    local TitleLabel = Instance.new("TextLabel")
+    TitleLabel.Size = UDim2.new(1, -10, 1, 0)
+    TitleLabel.Position = UDim2.new(0, 10, 0, 0)
+    TitleLabel.BackgroundTransparency = 1
+    TitleLabel.Text = "⚡ BRM5 UTILITIES ⚡"
+    TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    TitleLabel.TextSize = 18
+    TitleLabel.Font = Enum.Font.GothamBold
+    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    TitleLabel.Parent = TitleBar
+
+    -- Minimieren-Button
+    local MinBtn = Instance.new("TextButton")
+    MinBtn.Size = UDim2.new(0, 30, 0, 30)
+    MinBtn.Position = UDim2.new(1, -35, 0, 5)
+    MinBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    MinBtn.Text = "−"
+    MinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    MinBtn.TextSize = 20
+    MinBtn.Font = Enum.Font.GothamBold
+    MinBtn.BorderSizePixel = 0
+    MinBtn.Parent = TitleBar
+
+    local minCorner = Instance.new("UICorner")
+    minCorner.CornerRadius = UDim.new(0, 6)
+    minCorner.Parent = MinBtn
+
+    -- Content Frame
+    local ContentFrame = Instance.new("ScrollingFrame")
+    ContentFrame.Size = UDim2.new(1, -16, 1, -50)
+    ContentFrame.Position = UDim2.new(0, 8, 0, 45)
+    ContentFrame.BackgroundTransparency = 1
+    ContentFrame.ScrollBarThickness = 4
+    ContentFrame.ScrollBarImageColor3 = Color3.fromRGB(0, 180, 255)
+    ContentFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+    ContentFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    ContentFrame.Parent = MainFrame
+
+    local listLayout = Instance.new("UIListLayout")
+    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    listLayout.Padding = UDim.new(0, 5)
+    listLayout.Parent = ContentFrame
+
+    -- Toggle-Button Funktion
+    local function createToggle(name, key, order, enableFn, disableFn, activeRef)
+        local btnFrame = Instance.new("Frame")
+        btnFrame.Size = UDim2.new(1, 0, 0, 36)
+        btnFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+        btnFrame.BorderSizePixel = 0
+        btnFrame.LayoutOrder = order
+        btnFrame.Parent = ContentFrame
+
+        local bfCorner = Instance.new("UICorner")
+        bfCorner.CornerRadius = UDim.new(0, 6)
+        bfCorner.Parent = btnFrame
+
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(0.65, 0, 1, 0)
+        label.Position = UDim2.new(0, 10, 0, 0)
+        label.BackgroundTransparency = 1
+        label.Text = name .. "  [" .. key .. "]"
+        label.TextColor3 = Color3.fromRGB(200, 200, 200)
+        label.TextSize = 13
+        label.Font = Enum.Font.Gotham
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        label.Parent = btnFrame
+
+        local statusBtn = Instance.new("TextButton")
+        statusBtn.Size = UDim2.new(0, 55, 0, 24)
+        statusBtn.Position = UDim2.new(1, -65, 0.5, -12)
+        statusBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        statusBtn.Text = "AUS"
+        statusBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        statusBtn.TextSize = 12
+        statusBtn.Font = Enum.Font.GothamBold
+        statusBtn.BorderSizePixel = 0
+        statusBtn.Parent = btnFrame
+
+        local sCorner = Instance.new("UICorner")
+        sCorner.CornerRadius = UDim.new(0, 6)
+        sCorner.Parent = statusBtn
+
+        local function updateVisual(active)
+            if active then
+                statusBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
+                statusBtn.Text = "AN"
+                label.TextColor3 = Color3.fromRGB(0, 255, 100)
+            else
+                statusBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+                statusBtn.Text = "AUS"
+                label.TextColor3 = Color3.fromRGB(200, 200, 200)
+            end
+        end
+
+        local function toggle()
+            local isActive = activeRef()
+            if isActive then
+                disableFn()
+            else
+                enableFn()
+            end
+            updateVisual(not isActive)
+        end
+
+        statusBtn.MouseButton1Click:Connect(toggle)
+
+        return {update = updateVisual, toggle = toggle}
+    end
+
+    -- Alle Toggles erstellen
+    local toggles = {}
+
+    toggles.fullbright = createToggle("Fullbright", "I", 1,
+        enableFullbright, disableFullbright, function() return fullbrightActive end)
+
+    toggles.esp = createToggle("ESP Highlight", "U", 2,
+        enableESP, disableESP, function() return espActive end)
+
+    toggles.hitbox = createToggle("Hitbox ESP", "H", 3,
+        enableHitbox, disableHitbox, function() return hitboxActive end)
+
+    toggles.silentaim = createToggle("Silent Aim", "J", 4,
+        enableSilentAim, disableSilentAim, function() return silentAimActive end)
+
+    toggles.autoshoot = createToggle("AutoShoot", "K", 5,
+        enableAutoShoot, disableAutoShoot, function() return autoShootActive end)
+
+    toggles.fly = createToggle("Fly", "F", 6,
+        enableFly, disableFly, function() return flyActive end)
+
+    toggles.potato = createToggle("Potato Graphics", "P", 7,
+        enablePotato, disablePotato, function() return potatoActive end)
+
+    -- Minimieren-Logik
+    local minimized = false
+    MinBtn.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        ContentFrame.Visible = not minimized
+        if minimized then
+            MainFrame.Size = UDim2.new(0, 280, 0, 40)
+            MinBtn.Text = "+"
+        else
+            MainFrame.Size = UDim2.new(0, 280, 0, 420)
+            MinBtn.Text = "−"
+        end
+    end)
+
+    -- Info-Label
+    local infoLabel = Instance.new("TextLabel")
+    infoLabel.Size = UDim2.new(1, 0, 0, 25)
+    infoLabel.BackgroundTransparency = 1
+    infoLabel.Text = "Drücke T um GUI zu togglen"
+    infoLabel.TextColor3 = Color3.fromRGB(100, 100, 100)
+    infoLabel.TextSize = 11
+    infoLabel.Font = Enum.Font.Gotham
+    infoLabel.LayoutOrder = 99
+    infoLabel.Parent = ContentFrame
+
+    return ScreenGui, toggles
+end
+
+local gui, toggles = createGUI()
+
+-- ══════════════════════════════════════
+--  KEYBINDS
+-- ══════════════════════════════════════
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if UserInputService:GetFocusedTextBox() then return end
+    if gameProcessed then return end
+
+    if input.KeyCode == Enum.KeyCode.I then
+        toggles.fullbright.toggle()
+
+    elseif input.KeyCode == Enum.KeyCode.U then
+        toggles.esp.toggle()
+
+    elseif input.KeyCode == Enum.KeyCode.H then
+        toggles.hitbox.toggle()
+
+    elseif input.KeyCode == Enum.KeyCode.J then
+        toggles.silentaim.toggle()
+
+    elseif input.KeyCode == Enum.KeyCode.K then
+        toggles.autoshoot.toggle()
+
+    elseif input.KeyCode == Enum.KeyCode.F then
+        toggles.fly.toggle()
+
+    elseif input.KeyCode == Enum.KeyCode.P then
+        toggles.potato.toggle()
+
+    elseif input.KeyCode == Enum.KeyCode.T then
+        -- GUI ein/ausblenden
+        if gui then
+            local main = gui:FindFirstChild("MainFrame")
+            if main then
+                main.Visible = not main.Visible
+            end
+        end
+    end
+end)
+
+-- ══════════════════════════════════════
+--  RESPAWN-HANDLER
+-- ══════════════════════════════════════
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    task.wait(1)
+
+    -- Fly muss bei Respawn neu angewendet werden
+    if flyActive then
+        flyActive = false
+        if flyConn then flyConn:Disconnect(); flyConn = nil end
+        if flyBody then flyBody:Destroy(); flyBody = nil end
+        if flyGyro then flyGyro:Destroy(); flyGyro = nil end
+        task.wait(0.5)
+        enableFly()
+    end
+
+    -- ESP und Hitbox automatisch auf neuen Character anwenden
+    if espActive then
+        task.wait(0.5)
+        scanAndApplyESP(Workspace)
+    end
+
+    if hitboxActive then
+        task.wait(0.5)
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj:IsA("Model") then
+                pcall(function() applyHitboxToModel(obj) end)
+            end
+        end
+    end
+end)
+
+LocalPlayer.CharacterRemoving:Connect(function()
+    if flyBody then flyBody:Destroy(); flyBody = nil end
+    if flyGyro then flyGyro:Destroy(); flyGyro = nil end
+    if flyConn then flyConn:Disconnect(); flyConn = nil end
+end)
+
+-- ══════════════════════════════════════
+--  INITIALISIERUNG
+-- ══════════════════════════════════════
+
+RemoveGrassMaterial()
+
+print("══════════════════════════════════════")
+print("  BRM5 UTILITIES GELADEN")
+print("══════════════════════════════════════")
+print("  [I] Fullbright")
+print("  [U] ESP Highlight")
+print("  [H] Hitbox ESP")
+print("  [J] Silent Aim")
+print("  [K] AutoShoot")
+print("  [F] Fly")
+print("  [P] Potato Graphics")
+print("  [T] GUI Toggle")
+print("══════════════════════════════════════")
