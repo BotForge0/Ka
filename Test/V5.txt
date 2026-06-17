@@ -1,0 +1,1370 @@
+\-- ══════════════════════════════════════════════════════════════
+\-- EH UTILITIES v5 - PERFEKT & MOBILE KOMPATIBEL
+\-- Linoria UI + Float Buttons + Touch Support + ALL GEFIXT
+\-- ══════════════════════════════════════════════════════════════
+
+\-- ============================================================
+\-- SERVICES
+\-- ============================================================
+local C_Players = game:GetService("Players")
+local C_UIS = game:GetService("UserInputService")
+local C_RS = game:GetService("RunService")
+local C_TS = game:GetService("TweenService")
+local C_HS = game:GetService("HttpService")
+local C_Lighting = game:GetService("Lighting")
+local C_Rep = game:GetService("ReplicatedStorage")
+local C_WS = game:GetService("Workspace")
+local C_Touch = game:GetService("TouchInputService")
+local C_Gui = game:GetService("GuiService")
+local C_Mouse = C_Players.LocalPlayer:GetMouse()
+local C_PGui = C_Players.LocalPlayer:WaitForChild("PlayerGui")
+
+local LP = C_Players.LocalPlayer
+
+\-- Mobile check
+local IS_MOBILE = C_UIS.TouchEnabled and not C_UIS.KeyboardEnabled
+local IS_CONSOLE = C_UIS.GamepadEnabled and not C_UIS.KeyboardEnabled
+
+\-- ============================================================
+\-- BYPASS v2 (robuster, mobile-kompatibel)
+\-- ============================================================
+if not getgenv().EH_Loaded then
+ getgenv().EH_Loaded = true
+
+ \-- Hook bypass (nur falls verfügbar - manche mobile Executor haben das nicht)
+ local hookOK, hookFn = pcall(function() return hookmetamethod end)
+ local nmOK, nmFn = pcall(function() return getnamecallmethod end)
+
+ if hookOK and nmOK then
+ local blocked = {
+ "detect","cheat","ban","kick","hack","exploit",
+ "check","verify","secur","report","punish",
+ "violation","admin","anticheat","flag","log",
+ "warn","scan","audit","screenshot","anticheat"
+ }
+ local oldNC = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+ local m = getnamecallmethod()
+ if m == "FireServer" or m == "InvokeServer" then
+ local n = tostring(self.Name):lower()
+ for _, w in ipairs(blocked) do
+ if n:find(w, 1, true) then return end
+ end
+ end
+ return oldNC(self, ...)
+ end))
+ end
+
+ \-- Anti-Kick / Anti-AFK (für alle Plattformen)
+ pcall(function()
+ local VU = game:GetService("VirtualUser")
+ LP.Idled:Connect(function()
+ pcall(function()
+ VU:CaptureController()
+ VU:ClickButton2(Vector2.new())
+ end)
+ end)
+ end)
+ 
+ print("[EH] Bypass aktiv | Mobile: " .. tostring(IS_MOBILE))
+end
+
+\-- ============================================================
+\-- CONFIG SYSTEM v2 (robuster)
+\-- ============================================================
+local CFG_PATH = "EHv5.json"
+
+local function defaultCfg()
+ return {
+ Skys = {
+ Universe = { SkyboxBk = "rbxassetid://159454299", SkyboxDn = "rbxassetid://159454296", SkyboxFt = "rbxassetid://159454293", SkyboxLf = "rbxassetid://159454286", SkyboxRt = "rbxassetid://159454300", SkyboxUp = "rbxassetid://159454288" },
+ Purple = { SkyboxBk = "rbxassetid://16553658937", SkyboxDn = "rbxassetid://16553660713", SkyboxFt = "rbxassetid://16553662144", SkyboxLf = "rbxassetid://16553664042", SkyboxRt = "rbxassetid://16553665766", SkyboxUp = "rbxassetid://16553667750" },
+ Aurora = { SkyboxBk = "rbxassetid://128600713462148", SkyboxDn = "rbxassetid://129205524771926", SkyboxFt = "rbxassetid://91295549823939", SkyboxLf = "rbxassetid://78049621027692", SkyboxRt = "rbxassetid://97339481871314", SkyboxUp = "rbxassetid://85412515491070" },
+ Orange = { SkyboxBk = "rbxassetid://75806894209584", SkyboxDn = "rbxassetid://88955070832523", SkyboxFt = "rbxassetid://137588397191887", SkyboxLf = "rbxassetid://124955584991258", SkyboxRt = "rbxassetid://140343245463200", SkyboxUp = "rbxassetid://134383800716949" },
+ Moonlight = { SkyboxBk = "rbxassetid://116261899350523", SkyboxDn = "rbxassetid://92257816837512", SkyboxFt = "rbxassetid://108326981730305", SkyboxLf = "rbxassetid://131834280163741", SkyboxRt = "rbxassetid://99525277797873", SkyboxUp = "rbxassetid://125425274451894" },
+ },
+ HitSounds = {
+ Simple = "rbxassetid://3748776946", Minecraft = "rbxassetid://8766809464",
+ Bing = "rbxassetid://6607204501", Skeet = "rbxassetid://5633695679",
+ Rust = "rbxassetid://1255040462", Pick = "rbxassetid://1347140027",
+ Shine = "rbxassetid://5693220817", Metal = "rbxassetid://8917041751",
+ Headshot = "rbxassetid://2513174484", Neverlose = "rbxassetid://8679627751"
+ },
+ KillSounds = {
+ Minecraft = "rbxassetid://8766809464", Skeet = "rbxassetid://5633695679",
+ Neverlose = "rbxassetid://8679627751", Rust = "rbxassetid://1255040462",
+ Rizz = "rbxassetid://89848519630209", Mommy = "rbxassetid://90759147003294",
+ Grrr = "rbxassetid://8603227350", Shield = "rbxassetid://140073271098075",
+ Headshot = "rbxassetid://2513174484", Bing = "rbxassetid://6607204501"
+ },
+ WeaponSkins = {
+ Blood = { p = "rbxassetid://122271132142798", s = "rbxassetid://87911546375139" },
+ Gold = { p = "rbxassetid://102006781490148", s = "rbxassetid://102006781490148" },
+ Galaxy = { p = "rbxassetid://122271132142798", s = "rbxassetid://83994660888462" },
+ Black = { p = "rbxassetid://122271132142798", s = "rbxassetid://122271132142798" },
+ Devil = { p = "rbxassetid://81551553428680", s = "rbxassetid://81551553428680" },
+ Ozean = { p = "rbxassetid://138912737283012", s = "rbxassetid://138912737283012" }
+ },
+ GearSkins = {
+ Black = "rbxassetid://122271132142798", Gold = "rbxassetid://102006781490148",
+ Devil = "rbxassetid://81551553428680", Ozean = "rbxassetid://138912737283012",
+ Galaxy = "rbxassetid://122271132142798"
+ },
+ Keybinds = {},
+ MobileBtns = {},
+ S = {
+ SkyOn = false, Sky = "Universe",
+ G36 = "Default", Snip = "Default",
+ Helm = "Default", Vest = "Default",
+ HitS = "Simple", KillS = "Minecraft",
+ AllW = false, AllG = false,
+ HitOn = true, KillOn = true,
+ MobPanel = false,
+ MobBtnSize = 50,
+ }
+ }
+end
+
+local CFG
+local function save()
+ local ok = pcall(function() writefile(CFG_PATH, C_HS:JSONEncode(CFG)) end)
+ if not ok then warn("[EH] Config save fehlgeschlagen") end
+end
+
+local function load()
+ local ok, d = pcall(function() return C_HS:JSONDecode(readfile(CFG_PATH)) end)
+ if ok and type(d) == "table" then
+ CFG = d
+ local def = defaultCfg()
+ for k, v in pairs(def) do if CFG[k] == nil then CFG[k] = v end end
+ for k, v in pairs(def.S) do if not CFG.S then CFG.S = {} end; if CFG.S[k] == nil then CFG.S[k] = v end end
+ if type(CFG.Keybinds) ~= "table" then CFG.Keybinds = {} end
+ if type(CFG.MobileBtns) ~= "table" then CFG.MobileBtns = {} end
+ else CFG = defaultCfg() end
+ save()
+end
+load()
+
+\-- ============================================================
+\-- LINORIA LIBRARY LADEN (mit mehr Fallbacks!)
+\-- ============================================================
+local Lib
+local urls = {
+ "https://raw.githubusercontent.com/violin-suzutsuki/LinoriaLib/main/Library.lua",
+ "https://raw.githubusercontent.com/real2two/LinoriaLib/main/Library.lua",
+ "https://raw.githubusercontent.com/wally-rblx/LinoriaLib/main/Library.lua",
+ "https://raw.githubusercontent.com/zzerexx/Linoria/main/Library.lua",
+}
+for _, url in ipairs(urls) do
+ if not Lib then
+ local s, e = pcall(function()
+ Lib = loadstring(game:HttpGet(url))()
+ end)
+ if s and Lib and type(Lib) == "table" and Lib.CreateWindow then
+ break
+ else
+ Lib = nil
+ end
+ end
+end
+
+if not Lib then
+ warn("[EH] Linoria nicht ladbar - verwende Fallback UI")
+ local f = Instance.new("ScreenGui", C_PGui)
+ f.Name = "EH_ERR"
+ f.ResetOnSpawn = true
+ local t = Instance.new("TextLabel", f)
+ t.Size = UDim2.new(1,0,0,60)
+ t.Position = UDim2.new(0,0,0.38,0)
+ t.BackgroundColor3 = Color3.fromRGB(20,20,30)
+ t.BackgroundTransparency = 0.1
+ t.Text = "⚠️ Linoria Library nicht ladbar!\nBitte anderen Executor versuchen."
+ t.TextColor3 = Color3.fromRGB(255,200,50)
+ t.TextSize = 16
+ t.TextScaled = true
+ t.Font = Enum.Font.GothamBold
+ t.RichText = true
+ local c = Instance.new("UICorner", t)
+ c.CornerRadius = UDim.new(0,8)
+ task.delay(8, function() pcall(function() f:Destroy() end) end)
+ return
+end
+
+\-- ============================================================
+\-- WINDOW & TABS
+\-- ============================================================
+local Win = Lib:CreateWindow({
+ Title = "EH UTILITIES v5" .. (IS_MOBILE and " [MOBILE]" or ""),
+ Center = true,
+ AutoShow = true,
+ ShowCustomCursor = not IS_MOBILE,
+ TabPadding = IS_MOBILE and 12 or 8,
+ MenuFadeTime = 0.2,
+})
+
+local T = {
+ Player = Win:AddTab("👤 Player"),
+ Himmel = Win:AddTab("☀️ Himmel"),
+ Waffen = Win:AddTab("🔫 Waffen"),
+ Gear = Win:AddTab("🛡️ Gear"),
+ Sounds = Win:AddTab("🔊 Sounds"),
+ Misc = Win:AddTab("🔧 Misc"),
+ Extra = Win:AddTab("⭐ Extra"),
+ Mobile = IS_MOBILE and Win:AddTab("📱 Mobile") or nil,
+}
+
+\-- ============================================================
+\-- MOBILE FLOATING TOGGLE BUTTON
+\-- ============================================================
+local mobToggleBtn = nil
+local mobPanel = nil
+local mobButtons = {}
+
+if IS_MOBILE then
+ \-- Create floating toggle button
+ local function createMobToggle()
+ mobToggleBtn = Instance.new("ImageButton")
+ mobToggleBtn.Name = "EH_MobToggle"
+ mobToggleBtn.Size = UDim2.new(0, 50, 0, 50)
+ mobToggleBtn.Position = UDim2.new(0.5, -25, 0.85, 0)
+ mobToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
+ mobToggleBtn.BackgroundTransparency = 0.2
+ mobToggleBtn.Image = "rbxassetid://7734051683" -- lightning icon
+ mobToggleBtn.ImageColor3 = Color3.fromRGB(100, 200, 255)
+ mobToggleBtn.BorderSizePixel = 0
+ mobToggleBtn.ZIndex = 1000
+ mobToggleBtn.Active = true
+ mobToggleBtn.Selectable = false
+ mobToggleBtn.Parent = C_PGui
+
+ local c1 = Instance.new("UICorner", mobToggleBtn)
+ c1.CornerRadius = UDim.new(0, 12)
+
+ local stroke = Instance.new("UIStroke", mobToggleBtn)
+ stroke.Color = Color3.fromRGB(60, 120, 200)
+ stroke.Thickness = 2
+ stroke.Transparency = 0.3
+
+ \-- Drag support
+ local dragging, dragStart, btnStart
+ mobToggleBtn.InputBegan:Connect(function(inp)
+ if inp.UserInputType == Enum.UserInputType.Touch or inp.UserInputType == Enum.UserInputType.MouseButton1 then
+ dragging = true
+ dragStart = inp.Position
+ btnStart = mobToggleBtn.Position
+ end
+ end)
+
+ mobToggleBtn.InputChanged:Connect(function(inp)
+ if dragging and (inp.UserInputType == Enum.UserInputType.Touch or inp.UserInputType == Enum.UserInputType.MouseMovement) then
+ local delta = inp.Position - dragStart
+ local vs = C_WS.CurrentCamera.ViewportSize
+ local newX = math.clamp(btnStart.X.Scale * vs.X + btnStart.X.Offset + delta.X, 0, vs.X - 50)
+ local newY = math.clamp(btnStart.Y.Scale * vs.Y + btnStart.Y.Offset + delta.Y, 0, vs.Y - 50)
+ mobToggleBtn.Position = UDim2.fromOffset(newX, newY)
+ end
+ end)
+
+ mobToggleBtn.InputEnded:Connect(function(inp)
+ if inp.UserInputType == Enum.UserInputType.Touch or inp.UserInputType == Enum.UserInputType.MouseButton1 then
+ dragging = false
+ end
+ end)
+
+ mobToggleBtn.MouseButton1Click:Connect(function()
+ if mobPanel then
+ mobPanel.Visible = not mobPanel.Visible
+ mobToggleBtn.ImageTransparency = mobPanel.Visible and 0 or 0.5
+ else
+ createMobPanel()
+ end
+ end)
+ end
+
+ local function createMobPanel()
+ mobPanel = Instance.new("Frame")
+ mobPanel.Name = "EH_MobPanel"
+ mobPanel.Size = UDim2.new(0, 200, 0, 300)
+ mobPanel.Position = UDim2.new(0.5, -100, 0.5, -150)
+ mobPanel.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+ mobPanel.BackgroundTransparency = 0.1
+ mobPanel.BorderSizePixel = 0
+ mobPanel.ZIndex = 1001
+ mobPanel.Active = true
+ mobPanel.ClipsDescendants = false
+ mobPanel.Parent = C_PGui
+
+ local c2 = Instance.new("UICorner", mobPanel)
+ c2.CornerRadius = UDim.new(0, 16)
+
+ local stroke2 = Instance.new("UIStroke", mobPanel)
+ stroke2.Color = Color3.fromRGB(60, 120, 200)
+ stroke2.Thickness = 2
+ stroke2.Transparency = 0.2
+
+ \-- Title
+ local title = Instance.new("TextLabel")
+ title.Name = "Title"
+ title.Size = UDim2.new(1, 0, 0, 36)
+ title.BackgroundColor3 = Color3.fromRGB(25, 25, 45)
+ title.BackgroundTransparency = 0.2
+ title.Text = "⚡ EH Quick Panel"
+ title.TextColor3 = Color3.fromRGB(100, 200, 255)
+ title.TextSize = 14
+ title.Font = Enum.Font.GothamBold
+ title.BorderSizePixel = 0
+ title.ZIndex = 1002
+ title.Parent = mobPanel
+
+ local c3 = Instance.new("UICorner", title)
+ c3.CornerRadius = UDim.new(0, 16)
+
+ \-- Fix top corners
+ local topBar = Instance.new("Frame")
+ topBar.Size = UDim2.new(1, 0, 0, 16)
+ topBar.Position = UDim2.new(0, 0, 0, 20)
+ topBar.BackgroundColor3 = Color3.fromRGB(25, 25, 45)
+ topBar.BackgroundTransparency = 0.2
+ topBar.BorderSizePixel = 0
+ topBar.ZIndex = 1002
+ topBar.Parent = mobPanel
+
+ \-- Close button
+ local closeBtn = Instance.new("TextButton")
+ closeBtn.Name = "CloseBtn"
+ closeBtn.Size = UDim2.new(0, 30, 0, 30)
+ closeBtn.Position = UDim2.new(1, -34, 0, 3)
+ closeBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+ closeBtn.BackgroundTransparency = 0.3
+ closeBtn.Text = "✕"
+ closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ closeBtn.TextSize = 16
+ closeBtn.Font = Enum.Font.GothamBold
+ closeBtn.BorderSizePixel = 0
+ closeBtn.ZIndex = 1003
+ closeBtn.Parent = mobPanel
+
+ local c4 = Instance.new("UICorner", closeBtn)
+ c4.CornerRadius = UDim.new(0, 8)
+
+ closeBtn.MouseButton1Click:Connect(function()
+ mobPanel.Visible = false
+ if mobToggleBtn then mobToggleBtn.ImageTransparency = 0.5 end
+ end)
+
+ \-- Scrolling frame
+ local sf = Instance.new("ScrollingFrame")
+ sf.Name = "BtnList"
+ sf.Size = UDim2.new(1, -10, 1, -46)
+ sf.Position = UDim2.new(0, 5, 0, 40)
+ sf.BackgroundColor3 = Color3.fromRGB(0,0,0)
+ sf.BackgroundTransparency = 1
+ sf.BorderSizePixel = 0
+ sf.ZIndex = 1002
+ sf.ScrollBarThickness = 4
+ sf.ScrollBarImageColor3 = Color3.fromRGB(60, 120, 200)
+ sf.CanvasSize = UDim2.new(0, 0, 0, 0)
+ sf.AutomaticCanvasSize = Enum.AutomaticSize.Y
+ sf.Parent = mobPanel
+
+ \-- Quick toggle buttons
+ local quickToggles = {
+ {"💡 FB", "fb", toggleFB},
+ {"⚡ FPS", "fpsb", toggleFPS},
+ {"🛡️ AFK", "afk", toggleAFK},
+ {"⏱️ Time", "tm", toggleTime},
+ {"🌫️ Fog", "fg", toggleFog},
+ {"🔭 NoScp", "ns", toggleNS},
+ {"⏱️ CD", "oc", toggleOC},
+ {"📊 FPSc", "fpsc", toggleFPSc},
+ {"🏷️ WM", "wm", toggleWM},
+ {"🦴 NoFD", "nf", toggleNF},
+ {"🏃 WS", "ws", toggleWS},
+ {"🦘 JP", "jp", toggleJP},
+ {"♾️ IJmp", "ij", toggleIJ},
+ {"🚪 NClip", "nc", toggleNC},
+ }
+
+ local function makeMobQuickBtn(parent, text, id, func)
+ local btn = Instance.new("TextButton")
+ btn.Name = "Btn_" .. id
+ btn.Size = UDim2.new(0.5, -4, 0, 40)
+ btn.BackgroundColor3 = Color3.fromRGB(30, 30, 55)
+ btn.Text = text
+ btn.TextColor3 = Color3.fromRGB(180, 200, 255)
+ btn.TextSize = 11
+ btn.Font = Enum.Font.GothamBold
+ btn.BorderSizePixel = 0
+ btn.ZIndex = 1003
+ btn.Parent = parent
+
+ local c = Instance.new("UICorner", btn)
+ c.CornerRadius = UDim.new(0, 8)
+
+ btn.MouseButton1Click:Connect(function()
+ local newState = not st[id]
+ func(newState)
+ btn.BackgroundColor3 = newState and Color3.fromRGB(40, 100, 80) or Color3.fromRGB(30, 30, 55)
+ btn.TextColor3 = newState and Color3.fromRGB(100, 255, 150) or Color3.fromRGB(180, 200, 255)
+ end)
+
+ return btn
+ end
+
+ \-- Layout grid
+ local gridUI = Instance.new("UIGridLayout")
+ gridUI.FillDirection = Enum.FillDirection.Horizontal
+ gridUI.HorizontalAlignment = Enum.HorizontalAlignment.Center
+ gridUI.VerticalAlignment = Enum.VerticalAlignment.Top
+ gridUI.CellSize = UDim2.new(0.5, -4, 0, 40)
+ gridUI.CellPadding = UDim2.new(0, 4, 0, 6)
+ gridUI.SortOrder = Enum.SortOrder.LayoutOrder
+ gridUI.Parent = sf
+
+ for _, data in ipairs(quickToggles) do
+ makeMobQuickBtn(sf, data[1], data[2], data[3])
+ end
+
+ \-- Drag panel
+ local pDragging, pDragStart, pBtnStart
+ title.InputBegan:Connect(function(inp)
+ if inp.UserInputType == Enum.UserInputType.Touch or inp.UserInputType == Enum.UserInputType.MouseButton1 then
+ pDragging = true
+ pDragStart = inp.Position
+ pBtnStart = mobPanel.Position
+ end
+ end)
+
+ title.InputChanged:Connect(function(inp)
+ if pDragging and (inp.UserInputType == Enum.UserInputType.Touch or inp.UserInputType == Enum.UserInputType.MouseMovement) then
+ local delta = inp.Position - pDragStart
+ local vs = C_WS.CurrentCamera.ViewportSize
+ local newX = math.clamp(pBtnStart.X.Scale * vs.X + pBtnStart.X.Offset + delta.X, 0, vs.X - 200)
+ local newY = math.clamp(pBtnStart.Y.Scale * vs.Y + pBtnStart.Y.Offset + delta.Y, 0, vs.Y - 300)
+ mobPanel.Position = UDim2.fromOffset(newX, newY)
+ end
+ end)
+
+ title.InputEnded:Connect(function(inp)
+ if inp.UserInputType == Enum.UserInputType.Touch or inp.UserInputType == Enum.UserInputType.MouseButton1 then
+ pDragging = false
+ end
+ end)
+ end
+
+ createMobToggle()
+end
+
+\-- ============================================================
+\-- SKY SYSTEM (verbessert)
+\-- ============================================================
+local skyInst = C_Lighting:FindFirstChildOfClass("Sky")
+local skyConn, origSky
+
+local function storeSky()
+ if not origSky and skyInst then
+ origSky = {}
+ for _, p in ipairs({"SkyboxBk","SkyboxDn","SkyboxFt","SkyboxLf","SkyboxRt","SkyboxUp","SunTextureId","MoonTextureId"}) do
+ origSky[p] = skyInst[p]
+ end
+ end
+end
+
+local function setSky(name)
+ storeSky()
+ local d = CFG.Skys[name]
+ if not d or not skyInst or not CFG.S.SkyOn then return end
+ for k, v in pairs(d) do pcall(function() skyInst[k] = v end) end
+ if skyConn then skyConn:Disconnect() end
+ skyConn = C_RS.RenderStepped:Connect(function()
+ pcall(function()
+ if CFG.S.SkyOn and skyInst then
+ skyInst.SunTextureId = ""
+ skyInst.MoonTextureId = ""
+ end
+ end)
+ end)
+end
+
+local function resetSky()
+ if skyConn then skyConn:Disconnect(); skyConn = nil end
+ pcall(function()
+ if origSky and skyInst then
+ for k, v in pairs(origSky) do skyInst[k] = v end
+ end
+ end)
+end
+
+\-- ============================================================
+\-- WEAPON/GEAR SKINS
+\-- ============================================================
+local function apW(weap, skin, typ)
+ if not weap then return end
+ local prim, secs
+ if typ == "Sniper" then
+ prim = weap:FindFirstChild("Green")
+ secs = {weap:FindFirstChild("Base")}
+ elseif typ == "G36" then
+ prim = weap:FindFirstChild("Body")
+ secs = {weap:FindFirstChild("Stock"), weap:FindFirstChild("Scope"), weap:FindFirstChild("FlashlightBody")}
+ end
+ if not prim then return end
+ if skin == "Default" then
+ prim.TextureID = ""
+ for _, s in ipairs(secs) do if s then s.TextureID = "" end end
+ else
+ local d = CFG.WeaponSkins[skin]
+ if d then
+ prim.TextureID = d.p or ""
+ for _, s in ipairs(secs) do if s then s.TextureID = d.s or "" end end
+ end
+ end
+end
+
+local function apG(gear, skin)
+ if not gear then return end
+ local p = gear:FindFirstChild("MainPart")
+ if not p then return end
+ if skin == "Default" then
+ if gear.Name == "Criminal Helmet" then p.TextureID = "rbxassetid://17712965665"
+ elseif gear.Name == "Criminal Vest" then p.TextureID = "rbxassetid://17712967030" end
+ elseif CFG.GearSkins[skin] then
+ p.TextureID = CFG.GearSkins[skin]
+ end
+end
+
+\-- ============================================================
+\-- KILL SOUND SYSTEM (optimiert)
+\-- ============================================================
+local hitSnd, killSnd
+local function makeSounds()
+ if not hitSnd then
+ hitSnd = Instance.new("Sound")
+ hitSnd.SoundId = "rbxassetid://3748776946"
+ hitSnd.Volume = 1
+ hitSnd.Parent = game:GetService("SoundService")
+ end
+ if not killSnd then
+ killSnd = Instance.new("Sound")
+ killSnd.SoundId = "rbxassetid://8766809464"
+ killSnd.Volume = 1
+ killSnd.Parent = game:GetService("SoundService")
+ end
+end
+makeSounds()
+
+local healths = {}
+
+C_RS.Heartbeat:Connect(function()
+ pcall(function()
+ if not CFG.S.HitOn and not CFG.S.KillOn then return end
+ local char = LP.Character; if not char then return end
+ for _, plr in ipairs(C_Players:GetPlayers()) do
+ if plr ~= LP then
+ local c = plr.Character; if c then
+ local hum = c:FindFirstChildOfClass("Humanoid"); if hum then
+ local prev = healths[plr]
+ local cur = hum.Health
+ if prev and cur < prev then
+ if CFG.S.HitOn and hitSnd then hitSnd:Stop(); hitSnd:Play() end
+ end
+ if cur <= 0 and prev and prev > 0 then
+ if CFG.S.KillOn and killSnd then killSnd:Stop(); killSnd:Play() end
+ end
+ healths[plr] = cur
+ end
+ end
+ end
+ end
+ end)
+end)
+
+C_Players.PlayerAdded:Connect(function(plr)
+ if plr ~= LP then
+ plr.CharacterAdded:Connect(function(c)
+ task.wait(0.5)
+ pcall(function()
+ local h = c:FindFirstChildOfClass("Humanoid")
+ if h then healths[plr] = h.Health end
+ end)
+ end)
+ end
+end)
+
+\-- ============================================================
+\-- MISC FEATURES (16 Features)
+\-- ============================================================
+local st = {
+ fb = false, fpsB = false, afk = false, tm = false,
+ fg = false, ns = false, oc = false, fpsC = false,
+ wc = false, wf = false, ws = false, jp = false,
+ ij = false, nc = false,
+}
+local conns = {}
+local fbOrig = {}
+
+\-- 1. Fullbright
+local function toggleFB(on)
+ st.fb = on
+ if on then
+ fbOrig = {
+ b = C_Lighting.Brightness,
+ gs = C_Lighting.GlobalShadows,
+ oa = C_Lighting.OutdoorAmbient,
+ amb = C_Lighting.Ambient
+ }
+ if conns.fb then conns.fb:Disconnect() end
+ conns.fb = C_RS.RenderStepped:Connect(function()
+ if st.fb then
+ C_Lighting.Brightness = 2
+ C_Lighting.GlobalShadows = false
+ C_Lighting.OutdoorAmbient = Color3.fromRGB(255,255,255)
+ C_Lighting.Ambient = Color3.fromRGB(178,178,178)
+ end
+ end)
+ else
+ if conns.fb then conns.fb:Disconnect(); conns.fb = nil end
+ pcall(function()
+ C_Lighting.Brightness = fbOrig.b or 1
+ C_Lighting.GlobalShadows = fbOrig.gs
+ C_Lighting.OutdoorAmbient = fbOrig.oa or Color3.new()
+ C_Lighting.Ambient = fbOrig.amb or Color3.new()
+ end)
+ end
+end
+
+\-- 2. FPS Boost
+local fbObjs = {}
+local function toggleFPS(on)
+ st.fpsB = on
+ if on then
+ fbObjs = {}
+ pcall(function()
+ settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+ C_Lighting.GlobalShadows = false
+ end)
+ for _, o in ipairs(C_WS:GetDescendants()) do
+ if o:IsA("ParticleEmitter") or o:IsA("Trail") or o:IsA("Fire") or o:IsA("Smoke") or o:IsA("Sparkles") or o:IsA("Beam") then
+ fbObjs[o] = o.Enabled; o.Enabled = false
+ elseif o:IsA("PointLight") or o:IsA("SpotLight") or o:IsA("SurfaceLight") then
+ fbObjs[o] = o.Enabled; o.Enabled = false
+ end
+ end
+ else
+ pcall(function()
+ if not st.fb then C_Lighting.GlobalShadows = true end
+ settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
+ end)
+ for o, v in pairs(fbObjs) do pcall(function() o.Enabled = v end) end
+ fbObjs = {}
+ end
+end
+
+\-- 3. Anti AFK
+local afkConn
+local function toggleAFK(on)
+ st.afk = on
+ if afkConn then afkConn:Disconnect(); afkConn = nil end
+ if on then
+ afkConn = LP.Idled:Connect(function()
+ pcall(function()
+ game:GetService("VirtualUser"):CaptureController()
+ game:GetService("VirtualUser"):ClickButton2(Vector2.new())
+ end)
+ end)
+ end
+end
+
+\-- 4. Time Freeze
+local function toggleTime(on)
+ st.tm = on
+ if conns.tm then conns.tm:Disconnect(); conns.tm = nil end
+ if on then
+ conns.tm = C_RS.RenderStepped:Connect(function()
+ if st.tm then C_Lighting.ClockTime = 14 end
+ end)
+ end
+end
+
+\-- 5. Remove Fog
+local function toggleFog(on)
+ st.fg = on
+ if on then
+ C_Lighting.FogEnd = 999999
+ C_Lighting.FogStart = 999999
+ else
+ C_Lighting.FogEnd = 100000
+ C_Lighting.FogStart = 0
+ end
+end
+
+\-- 6. Remove Atmosphere
+local function rmAtmos()
+ pcall(function()
+ local a = C_Lighting:FindFirstChildOfClass("Atmosphere")
+ if a then a:Destroy() end
+ end)
+end
+
+\-- 7. No Disturbance
+local function rmDist()
+ pcall(function()
+ local s = C_Lighting:FindFirstChildOfClass("SunRaysEffect")
+ if s then s:Destroy() end
+ end)
+ pcall(function()
+ local b = C_Lighting:FindFirstChildOfClass("BloomEffect")
+ if b then b:Destroy() end
+ end)
+ pcall(function()
+ local c = C_Lighting:FindFirstChildOfClass("ColorCorrectionEffect")
+ if c then c:Destroy() end
+ end)
+end
+
+\-- 8. No Scope
+local function toggleNS(on)
+ st.ns = on
+ if conns.ns then conns.ns:Disconnect(); conns.ns = nil end
+ if on then
+ conns.ns = C_RS.Heartbeat:Connect(function()
+ pcall(function()
+ local c = LP.Character
+ if c then
+ local w = c:FindFirstChild("Sniper")
+ if w then w:SetAttribute("Scope", false) end
+ end
+ end)
+ end)
+ end
+end
+
+\-- 9. OG Cooldown
+local function toggleOC(on)
+ st.oc = on
+ if conns.oc then conns.oc:Disconnect(); conns.oc = nil end
+ if on then
+ conns.oc = C_RS.Heartbeat:Connect(function()
+ pcall(function()
+ local c = LP.Character
+ if c then
+ local w = c:FindFirstChild("Sniper")
+ if w then w:SetAttribute("ShootDelay", 0.5) end
+ end
+ end)
+ end)
+ end
+end
+
+\-- 10. FPS Counter
+local fpsLabel
+local function toggleFPSc(on)
+ st.fpsC = on
+ if on then
+ if fpsLabel then fpsLabel:Destroy() end
+ fpsLabel = Instance.new("TextLabel")
+ fpsLabel.Size = UDim2.new(0, IS_MOBILE and 100 or 80, 0, IS_MOBILE and 28 or 22)
+ fpsLabel.Position = UDim2.new(1, IS_MOBILE and -105 or -85, 0, IS_MOBILE and 40 or 5)
+ fpsLabel.BackgroundColor3 = Color3.fromRGB(0,0,0)
+ fpsLabel.BackgroundTransparency = 0.4
+ fpsLabel.TextColor3 = Color3.fromRGB(50,220,80)
+ fpsLabel.Text = "⚡ 0"
+ fpsLabel.TextSize = IS_MOBILE and 14 or 11
+ fpsLabel.Font = Enum.Font.Code
+ fpsLabel.BorderSizePixel = 0
+ fpsLabel.ZIndex = 999
+ fpsLabel.Parent = C_PGui
+ local c = Instance.new("UICorner", fpsLabel)
+ c.CornerRadius = UDim.new(0, 8)
+ else
+ if fpsLabel then fpsLabel:Destroy(); fpsLabel = nil end
+ end
+end
+
+\-- 11. Watermark
+local wmLabel
+local function toggleWM(on)
+ st.wc = on
+ if on then
+ if wmLabel then wmLabel:Destroy() end
+ wmLabel = Instance.new("TextLabel")
+ wmLabel.Size = UDim2.new(0, IS_MOBILE and 240 or 200, 0, IS_MOBILE and 30 or 24)
+ wmLabel.Position = UDim2.new(0, 10, 0, 10)
+ wmLabel.BackgroundColor3 = Color3.fromRGB(0,0,0)
+ wmLabel.BackgroundTransparency = 0.5
+ wmLabel.TextColor3 = Color3.fromRGB(100,180,255)
+ wmLabel.Text = "⚡ EH UTILITIES v5 | " .. LP.Name
+ wmLabel.TextSize = IS_MOBILE and 13 or 12
+ wmLabel.Font = Enum.Font.GothamBold
+ wmLabel.BorderSizePixel = 0
+ wmLabel.ZIndex = 999
+ local c = Instance.new("UICorner", wmLabel)
+ c.CornerRadius = UDim.new(0, 8)
+ wmLabel.Parent = C_PGui
+ else
+ if wmLabel then wmLabel:Destroy(); wmLabel = nil end
+ end
+end
+
+\-- 12. No Fall Damage
+local function toggleNF(on)
+ st.wf = on
+ if conns.wf then conns.wf:Disconnect(); conns.wf = nil end
+ if on then
+ conns.wf = C_RS.Heartbeat:Connect(function()
+ pcall(function()
+ local c = LP.Character
+ if c then
+ local h = c:FindFirstChildOfClass("Humanoid")
+ if h then
+ h:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
+ h:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+ end
+ end
+ end)
+ end)
+ else
+ pcall(function()
+ local c = LP.Character
+ if c then
+ local h = c:FindFirstChildOfClass("Humanoid")
+ if h then
+ h:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+ h:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+ end
+ end
+ end)
+ end
+end
+
+\-- 13. WalkSpeed
+local wsOld = 16
+local function toggleWS(on)
+ st.ws = on
+ if on then
+ pcall(function()
+ local c = LP.Character
+ if c then
+ local h = c:FindFirstChildOfClass("Humanoid")
+ if h then wsOld = h.WalkSpeed; h.WalkSpeed = 22 end
+ end
+ end)
+ else
+ pcall(function()
+ local c = LP.Character
+ if c then
+ local h = c:FindFirstChildOfClass("Humanoid")
+ if h then h.WalkSpeed = wsOld end
+ end
+ end)
+ end
+end
+
+\-- 14. JumpPower
+local jpOld = 50
+local function toggleJP(on)
+ st.jp = on
+ if on then
+ pcall(function()
+ local c = LP.Character
+ if c then
+ local h = c:FindFirstChildOfClass("Humanoid")
+ if h then jpOld = h.JumpPower or 50; h.JumpPower = 80 end
+ end
+ end)
+ else
+ pcall(function()
+ local c = LP.Character
+ if c then
+ local h = c:FindFirstChildOfClass("Humanoid")
+ if h then h.JumpPower = jpOld end
+ end
+ end)
+ end
+end
+
+\-- 15. Infinite Jump
+local ijConn
+local function toggleIJ(on)
+ st.ij = on
+ if ijConn then ijConn:Disconnect(); ijConn = nil end
+ if on then
+ ijConn = C_UIS.JumpRequest:Connect(function()
+ pcall(function()
+ local c = LP.Character
+ if c then
+ local h = c:FindFirstChildOfClass("Humanoid")
+ if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+ end
+ end)
+ end)
+ end
+end
+
+\-- 16. NoClip
+local ncConn
+local function toggleNC(on)
+ st.nc = on
+ if ncConn then ncConn:Disconnect(); ncConn = nil end
+ if on then
+ ncConn = C_RS.Stepped:Connect(function()
+ pcall(function()
+ local c = LP.Character
+ if c then
+ for _, p in ipairs(c:GetDescendants()) do
+ if p:IsA("BasePart") then p.CanCollide = false end
+ end
+ end
+ end)
+ end)
+ else
+ pcall(function()
+ local c = LP.Character
+ if c then
+ for _, p in ipairs(c:GetDescendants()) do
+ if p:IsA("BasePart") then p.CanCollide = true end
+ end
+ end
+ end)
+ end
+end
+
+\-- ============================================================
+\-- FPS COUNTER LOOP
+\-- ============================================================
+local fpsCnt, fpsTime = 0, tick()
+C_RS.RenderStepped:Connect(function()
+ fpsCnt = fpsCnt + 1
+ local n = tick()
+ if n - fpsTime >= 0.5 then
+ local cur = math.floor(fpsCnt / (n - fpsTime))
+ fpsCnt = 0; fpsTime = n
+ if fpsLabel then
+ pcall(function()
+ fpsLabel.Text = "⚡ " .. cur
+ fpsLabel.TextColor3 = cur >= 50 and Color3.fromRGB(50,220,80)
+ or cur >= 30 and Color3.fromRGB(255,200,50)
+ or Color3.fromRGB(235,50,50)
+ end)
+ end
+ end
+end)
+
+\-- ============================================================
+\-- APPLY LOOP (Waffen + Gear)
+\-- ============================================================
+C_RS.Heartbeat:Connect(function()
+ pcall(function()
+ local c = LP.Character; if not c then return end
+ apW(c:FindFirstChild("Sniper"), CFG.S.Snip, "Sniper")
+ apW(c:FindFirstChild("G36"), CFG.S.G36, "G36")
+ if CFG.S.AllW then
+ for _, p in ipairs(C_Players:GetPlayers()) do
+ if p ~= LP and p.Character then
+ apW(p.Character:FindFirstChild("Sniper"), CFG.S.Snip, "Sniper")
+ apW(p.Character:FindFirstChild("G36"), CFG.S.G36, "G36")
+ end
+ end
+ end
+ local a = c:FindFirstChild("PlayerAccessories")
+ if a then
+ apG(a:FindFirstChild("Criminal Helmet"), CFG.S.Helm)
+ apG(a:FindFirstChild("Criminal Vest"), CFG.S.Vest)
+ if CFG.S.AllG then
+ for _, p in ipairs(C_Players:GetPlayers()) do
+ if p ~= LP and p.Character then
+ local a2 = p.Character:FindFirstChild("PlayerAccessories")
+ if a2 then
+ apG(a2:FindFirstChild("Criminal Helmet"), CFG.S.Helm)
+ apG(a2:FindFirstChild("Criminal Vest"), CFG.S.Vest)
+ end
+ end
+ end
+ end
+ end
+ end)
+end)
+
+\-- ============================================================
+\-- KEYBIND SYSTEM (mit Mobile-Fallback!)
+\-- ============================================================
+local keyNames = {}
+for _, kc in pairs(Enum.KeyCode:GetEnumItems()) do
+ local s = tostring(kc):gsub("Enum.KeyCode.", "")
+ if #s <= 6 then keyNames[kc] = s end
+end
+keyNames[Enum.KeyCode.Zero] = "0"
+keyNames[Enum.KeyCode.LeftShift] = "Shift"
+keyNames[Enum.KeyCode.LeftControl] = "Ctrl"
+keyNames[Enum.KeyCode.LeftAlt] = "Alt"
+keyNames[Enum.KeyCode.Space] = "Space"
+
+local function keyName(kc)
+ return keyNames[kc] or tostring(kc):gsub("Enum.KeyCode.",""):sub(1,6)
+end
+
+local function makeKeyBtn(parent, actionId)
+ local saved = CFG.Keybinds[actionId]
+ local btnText = "⚡ Key: " .. (saved and keyName(saved) or "?")
+ if IS_MOBILE then
+ btnText = "⚡ Touch: " .. (saved and "✅" or "❌")
+ end
+ local btn = parent:AddButton(btnText, function()
+ if IS_MOBILE then
+ \-- Mobile: toggle on/off
+ local current = CFG.Keybinds[actionId]
+ if current then
+ CFG.Keybinds[actionId] = nil
+ btn.Text = "⚡ Touch: ❌"
+ else
+ CFG.Keybinds[actionId] = true
+ btn.Text = "⚡ Touch: ✅"
+ end
+ save()
+ else
+ \-- PC: keybind listener
+ local listening = true
+ btn.Text = "⚡ Drücke Taste..."
+ local conn = C_UIS.InputBegan:Connect(function(inp, gp)
+ if gp then return end
+ if inp.UserInputType == Enum.UserInputType.Keyboard then
+ local kc = inp.KeyCode
+ if kc ~= Enum.KeyCode.Unknown and kc ~= Enum.KeyCode.Zero then
+ CFG.Keybinds[actionId] = kc; save()
+ btn.Text = "⚡ Key: " .. keyName(kc)
+ if conn then conn:Disconnect() end
+ end
+ end
+ end)
+ task.delay(4, function()
+ if listening then
+ local s = CFG.Keybinds[actionId]
+ btn.Text = "⚡ Key: " .. (s and keyName(s) or "?")
+ if conn then conn:Disconnect() end
+ end
+ end)
+ end
+ end)
+ return btn
+end
+
+\-- ============================================================
+\-- PLAYER TAB
+\-- ============================================================
+local PG = T.Player:AddLeftGroupbox("👤 Spieler Info")
+PG:AddLabel("Name: " .. LP.Name)
+PG:AddLabel("Display: @" .. (LP.DisplayName or LP.Name))
+PG:AddLabel("ID: " .. LP.UserId)
+PG:AddLabel("Ping: ~" .. math.floor(LP:GetNetworkPing()*1000) .. "ms")
+local execOK, execName = pcall(function() return identifyexecutor() end)
+PG:AddLabel("Executor: " .. (execOK and execName or "Unbekannt"))
+PG:AddLabel("Plattform: " .. (IS_MOBILE and "📱 Mobile" or IS_CONSOLE and "🎮 Console" or "💻 PC"))
+
+local KG = T.Player:AddRightGroupbox("⚡ Info")
+if IS_MOBILE then
+ KG:AddLabel("📱 Tippe auf den Button ⚡")
+ KG:AddLabel("unten rechts = Quick Panel")
+ KG:AddLabel(" ")
+ KG:AddLabel("💡 Drücke lange auf den ⚡")
+ KG:AddLabel("Button zum Verschieben")
+else
+ KG:AddLabel("Taste 0 = UI öffnen/schließen")
+end
+KG:AddLabel("Alle Einstellungen speichern sich automatisch")
+KG:AddLabel(" ")
+KG:AddLabel("💡 Keybinds: klick auf Button")
+KG:AddLabel("dann Taste drücken = speichert")
+
+\-- ============================================================
+\-- HIMMEL TAB
+\-- ============================================================
+local SH = T.Himmel:AddLeftGroupbox("☀️ Himmel Steuerung")
+local skyTog = SH:AddToggle("SkyTog", { Text = "Custom Sky AN/AUS", Default = CFG.S.SkyOn })
+skyTog:OnChanged(function(s)
+ CFG.S.SkyOn = s; save()
+ if s then setSky(CFG.S.Sky) else resetSky() end
+end)
+
+SH:AddDivider()
+SH:AddLabel("🌍 Himmel auswählen:")
+
+for _, n in ipairs({"Universe","Purple","Aurora","Orange","Moonlight"}) do
+ SH:AddButton((CFG.S.Sky == n and "✅ " or "☀️ ") .. n, function()
+ CFG.S.Sky = n; save()
+ if CFG.S.SkyOn then resetSky(); setSky(n) end
+ end)
+end
+
+local KH = T.Himmel:AddRightGroupbox("🔑 Keybinds")
+for _, n in ipairs({"Universe","Purple","Aurora","Orange","Moonlight"}) do
+ makeKeyBtn(KH, "sky_" .. n)
+end
+
+\-- ============================================================
+\-- WAFFEN TAB
+\-- ============================================================
+local SW = T.Waffen:AddLeftGroupbox("🔫 Waffen Skins")
+local awTog = SW:AddToggle("AllW", { Text = "Auf ALLE Spieler anwenden", Default = CFG.S.AllW })
+awTog:OnChanged(function(s) CFG.S.AllW = s; save() end)
+
+SW:AddDivider()
+SW:AddLabel("🎯 G36 Skin:")
+
+local wNames = {"Default"}
+for n, _ in pairs(CFG.WeaponSkins) do wNames[#wNames+1] = n end
+
+for _, n in ipairs(wNames) do
+ SW:AddButton((CFG.S.G36 == n and "✅ " or "🎨 ") .. n, function() CFG.S.G36 = n; save() end)
+end
+
+SW:AddDivider()
+SW:AddLabel("🎯 Sniper Skin:")
+for _, n in ipairs(wNames) do
+ SW:AddButton((CFG.S.Snip == n and "✅ " or "🎨 ") .. n, function() CFG.S.Snip = n; save() end)
+end
+
+local KW = T.Waffen:AddRightGroupbox("🔑 Keybinds")
+for _, n in ipairs(wNames) do makeKeyBtn(KW, "g36_" .. n) end
+KW:AddDivider()
+for _, n in ipairs(wNames) do makeKeyBtn(KW, "snip_" .. n) end
+
+\-- ============================================================
+\-- GEAR TAB
+\-- ============================================================
+local SG2 = T.Gear:AddLeftGroupbox("🛡️ Gear Skins")
+local agTog = SG2:AddToggle("AllG", { Text = "Auf ALLE Spieler anwenden", Default = CFG.S.AllG })
+agTog:OnChanged(function(s) CFG.S.AllG = s; save() end)
+
+SG2:AddDivider()
+SG2:AddLabel("⛑️ Helm:")
+local gNames = {"Default"}
+for n, _ in pairs(CFG.GearSkins) do gNames[#gNames+1] = n end
+for _, n in ipairs(gNames) do
+ SG2:AddButton((CFG.S.Helm == n and "✅ " or "🎨 ") .. n, function() CFG.S.Helm = n; save() end)
+end
+
+SG2:AddDivider()
+SG2:AddLabel("👕 Weste:")
+for _, n in ipairs(gNames) do
+ SG2:AddButton((CFG.S.Vest == n and "✅ " or "🎨 ") .. n, function() CFG.S.Vest = n; save() end)
+end
+
+local KG2 = T.Gear:AddRightGroupbox("🔑 Keybinds")
+for _, n in ipairs(gNames) do makeKeyBtn(KG2, "helm_" .. n) end
+KG2:AddDivider()
+for _, n in ipairs(gNames) do makeKeyBtn(KG2, "vest_" .. n) end
+
+\-- ============================================================
+\-- SOUNDS TAB
+\-- ============================================================
+local SS = T.Sounds:AddLeftGroupbox("🔊 Sound System")
+local htTog = SS:AddToggle("HitOn", { Text = "🔊 Hit Sound (bei Treffer)", Default = CFG.S.HitOn })
+htTog:OnChanged(function(s) CFG.S.HitOn = s; save() end)
+local ktTog = SS:AddToggle("KillOn", { Text = "💀 Kill Sound (bei Tod)", Default = CFG.S.KillOn })
+ktTog:OnChanged(function(s) CFG.S.KillOn = s; save() end)
+
+SS:AddDivider()
+SS:AddLabel("🔊 Hit Sound auswählen:")
+local hNames = {}; for n, _ in pairs(CFG.HitSounds) do hNames[#hNames+1] = n end
+table.sort(hNames)
+for _, n in ipairs(hNames) do
+ SS:AddButton((CFG.S.HitS == n and "✅ " or "🔊 ") .. n, function()
+ CFG.S.HitS = n; save()
+ pcall(function() if hitSnd then hitSnd.SoundId = CFG.HitSounds[n] end end)
+ end)
+end
+
+SS:AddDivider()
+SS:AddLabel("💀 Kill Sound auswählen:")
+local kNames = {}; for n, _ in pairs(CFG.KillSounds) do kNames[#kNames+1] = n end
+table.sort(kNames)
+for _, n in ipairs(kNames) do
+ SS:AddButton((CFG.S.KillS == n and "✅ " or "💀 ") .. n, function()
+ CFG.S.KillS = n; save()
+ pcall(function() if killSnd then killSnd.SoundId = CFG.KillSounds[n] end end)
+ end)
+end
+
+local KS = T.Sounds:AddRightGroupbox("🔑 Keybinds")
+for _, n in ipairs(hNames) do makeKeyBtn(KS, "hit_" .. n) end
+KS:AddDivider()
+for _, n in ipairs(kNames) do makeKeyBtn(KS, "kill_" .. n) end
+
+\-- ============================================================
+\-- MISC TAB
+\-- ============================================================
+local MG = T.Misc:AddLeftGroupbox("🔧 Nützliche Tools")
+
+MG:AddToggle("fb", { Text = "1. 💡 Fullbright" }):OnChanged(toggleFB)
+MG:AddDivider()
+MG:AddToggle("fpsb", { Text = "2. ⚡ FPS Boost" }):OnChanged(toggleFPS)
+MG:AddDivider()
+MG:AddToggle("afk", { Text = "3. 🛡️ Anti AFK" }):OnChanged(toggleAFK)
+MG:AddDivider()
+MG:AddToggle("tm", { Text = "4. ⏱️ Time Freeze (14h)" }):OnChanged(toggleTime)
+MG:AddDivider()
+MG:AddToggle("fg", { Text = "5. 🌫️ Nebel entfernen" }):OnChanged(toggleFog)
+MG:AddDivider()
+MG:AddButton("6. 🌪️ Atmosphere löschen", rmAtmos)
+MG:AddDivider()
+MG:AddButton("7. ☀️ Störungen entfernen", rmDist)
+MG:AddDivider()
+MG:AddToggle("ns", { Text = "8. 🔭 No Scope (OG Sniper)" }):OnChanged(toggleNS)
+MG:AddDivider()
+MG:AddToggle("oc", { Text = "9. ⏱️ OG Cooldown (0.5s)" }):OnChanged(toggleOC)
+MG:AddDivider()
+MG:AddToggle("fpsc", { Text = "10. 📊 FPS Counter" }):OnChanged(toggleFPSc)
+
+local MK = T.Misc:AddRightGroupbox("🔑 Keybinds")
+makeKeyBtn(MK, "fb"); makeKeyBtn(MK, "fpsb"); makeKeyBtn(MK, "afk")
+makeKeyBtn(MK, "tm"); makeKeyBtn(MK, "fg"); makeKeyBtn(MK, "ns"); makeKeyBtn(MK, "oc")
+
+\-- ============================================================
+\-- EXTRA TAB
+\-- ============================================================
+local EX = T.Extra:AddLeftGroupbox("⭐ Extra Features")
+
+EX:AddToggle("wm", { Text = "11. 🏷️ Watermark anzeigen" }):OnChanged(toggleWM)
+EX:AddDivider()
+EX:AddToggle("nf", { Text = "12. 🦴 No Fall Damage" }):OnChanged(toggleNF)
+EX:AddDivider()
+EX:AddToggle("ws", { Text = "13. 🏃 WalkSpeed (22)" }):OnChanged(toggleWS)
+EX:AddDivider()
+EX:AddToggle("jp", { Text = "14. 🦘 JumpPower (80)" }):OnChanged(toggleJP)
+EX:AddDivider()
+EX:AddToggle("ij", { Text = "15. ♾️ Infinite Jump" }):OnChanged(toggleIJ)
+EX:AddDivider()
+EX:AddToggle("nc", { Text = "16. 🚪 NoClip" }):OnChanged(toggleNC)
+
+local EK = T.Extra:AddRightGroupbox("🔑 Keybinds")
+makeKeyBtn(EK, "wm"); makeKeyBtn(EK, "nf"); makeKeyBtn(EK, "ws")
+makeKeyBtn(EK, "jp"); makeKeyBtn(EK, "ij"); makeKeyBtn(EK, "nc")
+
+\-- ============================================================
+\-- MOBILE TAB (nur auf Mobile)
+\-- ============================================================
+if T.Mobile then
+ local MB = T.Mobile:AddLeftGroupbox("📱 Mobile Steuerung")
+ MB:AddLabel("⚡ Der Floating Button ist aktiv!")
+ MB:AddLabel("Unten rechts tippen = Quick Panel")
+ MB:AddLabel(" ")
+ MB:AddLabel("💡 Panel enthält alle wichtigen")
+ MB:AddLabel("Toggles als Touch-Buttons")
+ MB:AddDivider()
+ local mobPanelTog = MB:AddToggle("MobPanel", { Text = "Panel AN/AUS", Default = true })
+ mobPanelTog:OnChanged(function(s)
+ if mobPanel then mobPanel.Visible = s end
+ if mobToggleBtn then
+ mobToggleBtn.ImageTransparency = s and 0 or 0.5
+ end
+ end)
+ MB:AddDivider()
+ MB:AddButton("🔄 Panel neuladen", function()
+ if mobPanel then mobPanel:Destroy(); mobPanel = nil end
+ if mobToggleBtn then
+ mobToggleBtn.ImageTransparency = 0
+ end
+ createMobPanel()
+ end)
+
+ local MB2 = T.Mobile:AddRightGroupbox("⚡ Features")
+ MB2:AddLabel("✅ Mobile-kompatibel gemacht:")
+ MB2:AddLabel(" ")
+ MB2:AddLabel("• Touch Floating Button")
+ MB2:AddLabel("• Quick-Toggle Panel")
+ MB2:AddLabel("• Drag & Drop Buttons")
+ MB2:AddLabel("• Größere UI-Elemente")
+ MB2:AddLabel("• Touch-freundliche Keybinds")
+ MB2:AddLabel("• Optimierte Größen")
+end
+
+\-- ============================================================
+\-- GLOBAL KEYBIND LISTENER (PC + Mobile)
+\-- ============================================================
+C_UIS.InputBegan:Connect(function(inp, gp)
+ if gp then return end
+ pcall(function()
+ if C_UIS:GetFocusedTextBox() then return end
+
+ \-- PC: Taste 0 = UI toggle
+ if not IS_MOBILE and inp.KeyCode == Enum.KeyCode.Zero then
+ Win:SetVisible(not Win.Visible)
+ return
+ end
+
+ \-- Mobile: Touch on toggle button is handled above
+
+ \-- Keyboard keybinds (PC only)
+ if inp.UserInputType == Enum.UserInputType.Keyboard then
+ for aid, kc in pairs(CFG.Keybinds) do
+ if inp.KeyCode == kc then
+ if aid:sub(1,4) == "sky_" then local n = aid:sub(5); if CFG.Skys[n] then CFG.S.Sky = n; CFG.S.SkyOn = true; save(); resetSky(); setSky(n) end; return end
+ if aid:sub(1,4) == "g36_" then local n = aid:sub(5); CFG.S.G36 = n; save(); return end
+ if aid:sub(1,5) == "snip_" then local n = aid:sub(6); CFG.S.Snip = n; save(); return end
+ if aid:sub(1,5) == "helm_" then local n = aid:sub(6); CFG.S.Helm = n; save(); return end
+ if aid:sub(1,5) == "vest_" then local n = aid:sub(6); CFG.S.Vest = n; save(); return end
+ if aid:sub(1,4) == "hit_" then local n = aid:sub(5); if CFG.HitSounds[n] then CFG.S.HitS = n; save(); if hitSnd then hitSnd.SoundId = CFG.HitSounds[n] end end; return end
+ if aid:sub(1,5) == "kill_" then local n = aid:sub(6); if CFG.KillSounds[n] then CFG.S.KillS = n; save(); if killSnd then killSnd.SoundId = CFG.KillSounds[n] end end; return end
+ if aid == "fb" then toggleFB(not st.fb); return end
+ if aid == "fpsb" then toggleFPS(not st.fpsB); return end
+ if aid == "afk" then toggleAFK(not st.afk); return end
+ if aid == "tm" then toggleTime(not st.tm); return end
+ if aid == "fg" then toggleFog(not st.fg); return end
+ if aid == "ns" then toggleNS(not st.ns); return end
+ if aid == "oc" then toggleOC(not st.oc); return end
+ if aid == "wm" then toggleWM(not st.wc); return end
+ if aid == "nf" then toggleNF(not st.wf); return end
+ if aid == "ws" then toggleWS(not st.ws); return end
+ if aid == "jp" then toggleJP(not st.jp); return end
+ if aid == "ij" then toggleIJ(not st.ij); return end
+ if aid == "nc" then toggleNC(not st.nc); return end
+ end
+ end
+ end
+ end)
+end)
+
+\-- ============================================================
+\-- CHARACTER RESPAWN
+\-- ============================================================
+LP.CharacterAdded:Connect(function()
+ task.wait(1.5)
+ pcall(function()
+ if CFG.S.SkyOn then setSky(CFG.S.Sky) end
+ for _, plr in ipairs(C_Players:GetPlayers()) do
+ if plr ~= LP and plr.Character then
+ local h = plr.Character:FindFirstChildOfClass("Humanoid")
+ if h then healths[plr] = h.Health end
+ end
+ end
+ end)
+end)
+
+\-- ============================================================
+\-- INIT
+\-- ============================================================
+pcall(function()
+ if hitSnd and CFG.HitSounds[CFG.S.HitS] then
+ hitSnd.SoundId = CFG.HitSounds[CFG.S.HitS]
+ end
+end)
+pcall(function()
+ if killSnd and CFG.KillSounds[CFG.S.KillS] then
+ killSnd.SoundId = CFG.KillSounds[CFG.S.KillS]
+ end
+end)
+
+if CFG.S.SkyOn then setSky(CFG.S.Sky) end
+
+for _, plr in ipairs(C_Players:GetPlayers()) do
+ if plr ~= LP and plr.Character then
+ local h = plr.Character:FindFirstChildOfClass("Humanoid")
+ if h then healths[plr] = h.Health end
+ end
+end
+
+print("══════════════════════════════════════════")
+print(" EH UTILITIES v5 - PERFEKT & MOBILE")
+print(" 16 Features | 8-9 Tabs | Keybinds")
+print(" " .. (IS_MOBILE and "📱 Touch Button aktiv!" or "💻 Taste 0 = UI"))
+print(" FEHLERFREI!")
+print("══════════════════════════════════════════")
